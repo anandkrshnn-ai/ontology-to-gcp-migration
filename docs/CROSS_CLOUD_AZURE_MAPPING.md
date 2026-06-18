@@ -1,58 +1,47 @@
-# Cross-Cloud Portability: The Azure Mapping
+# Cross-Cloud Portability: Azure to GCP Mapping
 
-The V7 Migration Framework is architected around foundational data primitives, not vendor lock-in. While this repository heavily features Google Cloud Platform (GCP) configurations, the exact same execution strategy and pipeline logic apply directly to Microsoft Azure.
+A major barrier to enterprise cloud migrations is the fear of moving from one vendor lock-in (Palantir) directly into another (Google Cloud). 
 
-This document maps the mechanics of the V7 Framework to the Azure ecosystem, proving to multi-cloud CIOs that this migration strategy is universally defensible.
-
----
-
-## 1. The Storage Layer (Bronze / Landing)
-
-**The V7 Concept:** Severing the Palantir ingestion pipelines and routing raw data to a cheap, scalable object store before transforming it.
-
-*   **Palantir:** Foundry Files / Cloud Storage
-*   **GCP Target:** Google Cloud Storage (GCS)
-*   **Azure Target:** **Azure Data Lake Storage (ADLS) Gen2**
-*   *Execution Shift:* The Python extraction scripts simply change their output destination from the GCP Storage API to the `azure-storage-file-datalake` SDK. The folder hierarchy (`/bronze/dataset_id/yyyy/mm/dd/`) remains identical.
-
-## 2. The Analytical Engine (Silver / Gold)
-
-**The V7 Concept:** Moving interactive data exploration, complex aggregations, and materialized views from a proprietary backend to a cloud-native columnar OLAP engine.
-
-*   **Palantir:** Spark / Presto
-*   **GCP Target:** Google BigQuery
-*   **Azure Target:** **Azure Synapse Analytics (Dedicated SQL Pools) or Microsoft Fabric (OneLake + SQL Endpoints)**
-*   *Execution Shift:* Schemas translated by the V7 framework into `.sqlx` can be deployed via Synapse Notebooks or Data Factory. The concept of Materialized Views replacing Foundry Object Links applies perfectly to Synapse.
-
-## 3. The Transformation Orchestrator
-
-**The V7 Concept:** Translating proprietary Palantir Contour/Pipeline Builder logic into Git-backed, version-controlled SQL transformation graphs.
-
-*   **Palantir:** Pipeline Builder / Contour
-*   **GCP Target:** Dataform (SQLX)
-*   **Azure Target:** **Azure Data Factory (Mapping Data Flows) or dbt on Azure**
-*   *Execution Shift:* Azure's native Dataform equivalent is ADF Mapping Data Flows. However, for maximum code portability, deploying **dbt (data build tool)** on Azure Synapse is the recommended standard. The V7 Schema Converter can be easily adapted to output dbt `.sql` models instead of Dataform `.sqlx`.
-
-## 4. The Streaming Ingest & DLQ
-
-**The V7 Concept:** Bypassing batch latency for sub-second supply chain apps, and capturing permanent execution errors via Dead-Letter Queues.
-
-*   **Palantir:** Magritte Streaming
-*   **GCP Target:** Google Pub/Sub
-*   **Azure Target:** **Azure Event Hubs**
-*   *Execution Shift:* The `google.cloud.pubsub_v1` library used in the V7 extraction scripts is swapped for `azure-eventhub`. Event Hubs natively supports DLQ routing to ADLS Gen2, maintaining the exact same architectural resilience.
-
-## 5. Security & Governance Mapping
-
-**The V7 Concept:** Scraping Palantir's hierarchical security markings and injecting them into a cloud-native catalog for seamless row/column level access control.
-
-*   **Palantir:** Security Markings / Object Permissions
-*   **GCP Target:** Dataplex Policy Tags
-*   **Azure Target:** **Microsoft Purview**
-*   *Execution Shift:* The `metadata_scraper_to_policy_tags.py` script output is changed. Instead of generating Terraform for `google_data_catalog_policy_tag`, it generates the REST payloads or ARM templates required to define classifications and sensitivity labels in Microsoft Purview.
+This document serves as boardroom assurance. It explicitly proves that the V7 Migration Framework is built on **Sovereign Enterprise Standards** (Standard SQL, containerized APIs, decoupled storage) and can be fully ported to Microsoft Azure if strategic or regulatory requirements ever mandate an exit strategy.
 
 ---
 
-## The Verdict
+## 1. The Sovereign Framework Matrix
 
-By relying on standard APIs, exponential backoff (`tenacity`), semantic validation (PySpark), and CQRS proxies (FastAPI), **the V7 Migration Framework is completely cloud-agnostic at the execution layer.** Migrating to Azure requires only swapping the SDK endpoint targets, while the architectural strategy remains untouched.
+The following table maps the core components of our GCP architecture to their exact Azure equivalents. This proves operational continuity and hybrid-cloud readiness.
+
+| Migration Domain | Palantir Source | Target (GCP) | Sovereign Equivalent (Azure) | Migration / Portability Note |
+| :--- | :--- | :--- | :--- | :--- |
+| **Data Lake (Raw Data)** | Foundry Filesystem | **Cloud Storage (GCS)** | **ADLS Gen2** | Parquet files are universally portable. Object lifecycle and IAM mapped 1:1. |
+| **Data Warehouse** | Foundry Ontology | **BigQuery** | **Azure Synapse Analytics** | Uses Standard SQL dialect; schema and views port with minimal syntax changes. |
+| **Streaming & Telemetry** | Magritte Streaming | **Pub/Sub** | **Azure Event Hubs** | Event-driven architecture decoupled from storage. |
+| **ETL / Heavy Compute** | PySpark Code Repos | **Dataproc Serverless** | **Azure Databricks** | PySpark is 100% cloud-agnostic. Code ports directly with 1-to-1 compute portability. |
+| **Visual Pipelines** | Contour / Pipeline Builder| **Dataform (.sqlx)** | **dbt (Data Build Tool)** | Dataform's SQLX translates naturally to dbt models for Synapse/Databricks. |
+| **Data Governance** | Foundry Markings | **Dataplex** | **Microsoft Purview** | Policy tags, data lineage, and column-level security map structurally between the two. |
+| **Mutations / APIs** | Workshop Actions | **Cloud Run (FastAPI)** | **Azure Container Apps** | Dockerized REST APIs are universally portable. Zero vendor lock-in. |
+| **Identity & Access** | Palantir Multipass | **Cloud Identity / IAM** | **Microsoft Entra ID (Azure AD)** | OIDC/SAML mapping allows centralized identity governance. |
+| **Observability** | Foundry Data Health | **Cloud Monitoring** | **Azure Monitor** | Log sinks and SLA dashboards map to KQL queries. |
+
+---
+
+## 2. Portability Principles
+
+To ensure this framework remains a "Sovereign Standard" and doesn't devolve into proprietary lock-in, the engineering teams strictly adhere to the following principles:
+
+### A. Compute is Ephemeral and Containerized
+All migrated Palantir "Workshop Actions" (mutations) are written in FastAPI or Go and packaged as standard Docker containers. By deploying to **Cloud Run**, we guarantee they can be redeployed tomorrow on **Azure Container Apps** or an on-premise Kubernetes cluster without rewriting a single line of business logic.
+
+### B. Logic is Standardized (No Proprietary Dialects)
+We strictly forbid proprietary BigQuery extensions where standard SQL suffices. Palantir Contour logic is compiled into standard SQL CTEs. If the enterprise pivots to Azure, those same SQL scripts will execute in Synapse Analytics.
+
+### C. Data is Open Format
+All raw data egressed from Palantir is stored in standard Parquet format within Cloud Storage. Parquet natively retains schema definitions, allowing ADLS Gen2 and Azure Databricks to mount and read the data instantly if a cross-cloud migration is initiated.
+
+---
+
+## 3. Audit Readiness Statement
+
+By adhering to this Azure portability matrix, the organization guarantees to regulators and the Board of Directors that:
+1. **Data Sovereignty is maintained.**
+2. **Business Continuity is secured against GCP service disruptions.**
+3. **The IT estate is hybrid-ready and capable of multi-cloud acquisitions (M&A).**
