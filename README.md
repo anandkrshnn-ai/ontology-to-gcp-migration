@@ -7,9 +7,36 @@ This repository provides the **Universal Enterprise Standard (V7)** blueprint fo
 
 Migrating away from Palantir is not a simple "lift-and-shift." Foundry is deeply integrated vertically. This framework is designed to deconstruct that vertical lock-in and map it to GCP's open, modular ecosystem.
 
-## Phased Migration Timeline (V7 Universal Enterprise Standard)
+## Phased Migration Timeline (Engineering Toolkit)
 
-To execute this migration without disrupting operations, you must follow a sequenced, auditable, and contractually defensible rollout—moving from raw technical execution to boardroom-level assurance.
+To execute this migration without disrupting operations, you must follow a sequenced rollout—moving from raw technical execution to robust validation.
+
+### Architecture
+
+```mermaid
+graph TD
+    %% Styling
+    classDef default fill:#f8f9fa,stroke:#ced4da,stroke-width:1px,color:#212529;
+    classDef gcp fill:#e8f0fe,stroke:#4285f4,stroke-width:2px,color:#174ea6;
+    classDef palantir fill:#fce8e6,stroke:#ea4335,stroke-width:2px,color:#a50e0e;
+    
+    %% Nodes
+    PF[Palantir Foundry<br/>Datasets + Ontology]:::palantir
+    ES[Export Scripts<br/>export_foundry_datasets.py]
+    GCS[GCS Bronze Landing<br/>+ Checksum Validation]:::gcp
+    DF[Dataform / Dataproc<br/>Schema + Logic Translation]:::gcp
+    BQ[BigQuery Silver<br/>Ontology + Policy Tags]:::gcp
+    CR[Cloud Run Proxy<br/>Ontology API Compatibility]:::gcp
+    UI[Looker / Custom UI<br/>Analyst Enablement]:::gcp
+
+    %% Edges
+    PF --> ES
+    ES --> GCS
+    GCS --> DF
+    DF --> BQ
+    BQ --> CR
+    CR --> UI
+```
 
 ### Phase 0: Data Discovery (Pre-Migration Baseline)
 Establish the foundation by validating baselines and risks before moving any data.
@@ -57,27 +84,13 @@ While official vendor documentation focuses on **"what is possible"** (integrati
 *   [See the full mapping of V7 deliverables to official Palantir/GCP documentation here.](./docs/OFFICIAL_DOCS_MAPPING.md)
 *   [View the Executive Pitch Deck (Boardroom slides) here.](./docs/EXECUTIVE_PITCH_DECK.md)
 
----## Enterprise Migration Maturity Model (V7 & Executive ROI)
-This framework maps technical execution directly to C-level financial and operational outcomes (Risk Mitigation, Cost Takeout, Time-to-Value) using a tiered maturity model:
+---## Engineering Migration Maturity Model
 
-*   **Bronze (Infrastructure & Logic):** Data is liberated to multi-region GCS; logic runs on Dataform/Dataproc with continuous drift enforcement.
-    *   *Executive ROI:* **Cost Takeout.** 
-    *   *KPI Target:* Baseline **External FinOps Audited** Palantir License -> Target 80% reduction via GCP Compute costs (validated by corporate finance).
-*   **Silver (Semantics & UI):** Ontology is rebuilt in BigQuery/Dataplex with strict stewardship; analysts are collaborating in Git-backed Colab.
-    *   *Executive ROI:* **Time-to-Value & Adoption.** 
-    *   *KPI Target:* Baseline 80% legacy Contour usage -> Target culturally-tailored CSAT rebound with zero "Shadow IT" downtime.
-*   **Gold (Governance & Compliance):** Full CI/CD security propagation, VPC-SC perimeters, SLA-monitored streaming, and curated auditor dashboards with automated tiering.
-    *   *Executive ROI:* **Risk Mitigation.** 
-    *   *KPI Target:* Baseline 40 hours spent on regulatory audit -> Target 4 hours via Looker self-service. Baseline $100k/yr raw snapshot storage -> Target $20k/yr via Coldline/Archive tiering.
+This framework maps technical execution to operational outcomes using a tiered maturity model:
 
-## Proven Results: Multi-Industry Lighthouse Pilots (V7)
-To secure executive buy-in, you must present validated case studies across multiple verticals, proving the framework's universality. 
-*   **The Approach:** Select low-risk, high-visibility Palantir workflows across different business units to serve as "Lighthouse Pilots."
-*   **The Validation:** Baselines MUST be validated by external auditors or statistical sampling, not just internal IT estimates.
-*   **The Results (Proven Outcomes):** 
-    *   **Supply Chain (Logistics):** GCP Dataform processed a 500GB inventory pipeline 22% faster than Foundry Spark. $250k Palantir module license replaced by $45k GCP compute (Audited by Finance).
-    *   **Healthcare (PHM):** BigQuery JSON/STRUCTs successfully replicated temporal patient-link topologies. CSAT bounded to 88% within 3 weeks using Looker embedding.
-    *   **Financial Services (AML):** Cross-region DR failover was executed in under 12 minutes, satisfying strict SEC/FINRA multi-region resilience mandates.
+*   **Bronze (Infrastructure & Logic):** Data is liberated to multi-region GCS; logic runs on Dataform/Dataproc.
+*   **Silver (Semantics & UI):** Ontology is rebuilt in BigQuery/Dataplex with strict stewardship.
+*   **Gold (Governance & Compliance):** Full CI/CD security propagation, VPC-SC perimeters, SLA-monitored streaming, and automated tiering.
 
 ## Infrastructure as Code (IaC) Quick Start
 To rapidly provision the GCP landing zone (BigQuery, GCS, Dataplex, Composer, Pub/Sub), use the provided Terraform modules. Ensure you deploy within a VPC Service Perimeter (VPC-SC) for enterprise compliance.

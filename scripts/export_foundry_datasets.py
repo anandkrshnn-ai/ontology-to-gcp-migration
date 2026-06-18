@@ -106,11 +106,23 @@ def export_dataset_to_gcs(dataset_rid: str):
             publish_to_dlq(dataset_rid, file_path, str(e))
 
 if __name__ == "__main__":
-    sample_dataset_rid = "ri.foundry.main.dataset.YOUR_DATASET_RID_HERE"
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Export Palantir Foundry datasets to GCS.")
+    parser.add_argument("--dataset-rid", required=True, help="The Foundry Dataset RID to export.")
+    parser.add_argument("--bucket", default=os.environ.get("GCP_BUCKET_NAME"), help="Target GCS Bucket (overrides GCP_BUCKET_NAME env var).")
+    parser.add_argument("--dlq-topic", default=os.environ.get("GCP_DLQ_TOPIC"), help="Target DLQ Topic (overrides GCP_DLQ_TOPIC env var).")
     
+    args = parser.parse_args()
+    
+    if args.bucket:
+        GCP_BUCKET_NAME = args.bucket
+    if args.dlq_topic:
+        GCP_DLQ_TOPIC = args.dlq_topic
+        
     if not FOUNDRY_TOKEN:
-        logging.error("FOUNDRY_TOKEN environment variable is not set.")
+        logging.error("FOUNDRY_TOKEN environment variable is not set. Please set it before running.")
         exit(1)
         
-    export_dataset_to_gcs(sample_dataset_rid)
+    export_dataset_to_gcs(args.dataset_rid)
     logging.info("Export pipeline run completed.")

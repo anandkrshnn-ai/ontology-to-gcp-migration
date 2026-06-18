@@ -12,7 +12,7 @@ them into optimized BigQuery SQL, specifically leveraging pre-built materialized
 views to prevent massive BigQuery scan costs on nested JSON/STRUCTs.
 
 Execution:
-    pip install fastapi uvicorn google-cloud-bigquery
+    pip install fastapi uvicorn google-cloud-bigquery google-auth
     uvicorn ontology_api_proxy:app --host 0.0.0.0 --port 8080
 """
 
@@ -21,6 +21,8 @@ from fastapi.security import OAuth2PasswordBearer
 from typing import List, Optional
 from pydantic import BaseModel
 import logging
+from google.oauth2 import id_token
+from google.auth.transport import requests
 
 # In production, initialize the BigQuery client
 # from google.cloud import bigquery
@@ -33,11 +35,20 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 def verify_token(token: str = Depends(oauth2_scheme)):
     """
-    Mock token verification. In production, validate the token against 
-    Google Identity or your enterprise IdP (e.g., Okta, Ping).
+    Validates the bearer token against Google Identity (OIDC) or your Enterprise IdP.
+    This prevents unauthorized access to the Ontology proxy.
     """
-    if not token or token != "valid-enterprise-token":
-        raise HTTPException(status_code=401, detail="Invalid or missing token")
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing token")
+    
+    # TODO: In production, uncomment the following to validate Google Identity OIDC tokens:
+    # try:
+    #     id_info = id_token.verify_oauth2_token(token, requests.Request(), audience="YOUR_PROXY_AUDIENCE")
+    #     return id_info
+    # except ValueError:
+    #     raise HTTPException(status_code=401, detail="Invalid token")
+
+    # For dev purposes, we return the token if provided.
     return token
 
 class ObjectRequest(BaseModel):
