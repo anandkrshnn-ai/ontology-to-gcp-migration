@@ -8,7 +8,7 @@
 
 # The Shared VPC network hosted in the central networking project
 resource "google_compute_network" "shared_vpc" {
-  name                    = "vpc-dhl-palantir-migration"
+  name                    = "vpc-enterprise-palantir-migration"
   auto_create_subnetworks = false
   project                 = var.project_id # In a real setup, this would be var.host_project_id
   description             = "Central Shared VPC for all migrated Palantir workloads"

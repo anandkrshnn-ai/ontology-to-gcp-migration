@@ -12,7 +12,7 @@ Palantir uses "Spaces" to logically separate lines of business. In GCP, we map t
 
 | Palantir Concept | GCP Implementation | Description |
 | :--- | :--- | :--- |
-| **Organization** | GCP Organization Node | The root of the enterprise tree (e.g., `dhl.com`). |
+| **Organization** | GCP Organization Node | The root of the enterprise tree (e.g., `enterpriseco.com`). |
 | **Spaces** | GCP Folders | Logical grouping (e.g., `Folder: Logistics`, `Folder: Finance`). |
 | **Projects / Use Cases** | GCP Projects | We enforce a strict **Hub-and-Spoke** model. One `Host Project` for networking, and multiple `Service Projects` (Data, Apps, Analytics) for workloads. |
 
