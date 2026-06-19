@@ -20,7 +20,7 @@ steps:
       - '-c'
       - |
         cd terraform/envs/dev
-        terraform apply -auto-approve -var="project_id=placeholder-project" -var="region=us-central1"
+        terraform apply -auto-approve -var-file="terraform.tfvars" -input=false
 
   # 3. Apply Ontology changes (ingestion + diffing + Spanner registry update)
   # In later phases, this steps also triggers graph DDL compilation.
@@ -30,5 +30,8 @@ steps:
     args:
       - '-c'
       - |
+        set -e
+        cd /workspace
+        export PYTHONPATH=/workspace
         pip install -r requirements.txt
         python -m scripts.orchestrator --action apply --source pilots/logistics_sla_monitor/
