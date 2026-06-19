@@ -4,6 +4,15 @@ variable "org_id" {
   description = "GCP Organization ID for VPC-SC"
   type        = string
 }
+variable "access_policy_name" {
+  description = "Numeric name of the org Access Context Manager policy."
+  type        = string
+  default     = ""
+}
+
+locals {
+  policy_name = var.access_policy_name != "" ? var.access_policy_name : var.org_id
+}
 
 resource "google_compute_network" "shared_vpc" {
   name                    = "vpc-enterprise-palantir-migration"
@@ -28,15 +37,10 @@ resource "google_compute_subnetwork" "apps_subnet" {
   private_ip_google_access = true
 }
 
-# Access Policy
-data "google_access_context_manager_access_policy" "org_policy" {
-  parent = "organizations/${var.org_id}"
-}
-
 # VPC Service Controls Perimeter
 resource "google_access_context_manager_service_perimeter" "palantir_data_perimeter" {
-  parent         = "accessPolicies/${data.google_access_context_manager_access_policy.org_policy.name}"
-  name           = "accessPolicies/${data.google_access_context_manager_access_policy.org_policy.name}/servicePerimeters/palantir_migration_perimeter"
+  parent         = "accessPolicies/${local.policy_name}"
+  name           = "accessPolicies/${local.policy_name}/servicePerimeters/palantir_migration_perimeter"
   title          = "Palantir Migration Data Perimeter"
   description    = "Prevents data exfiltration from BigQuery, GCS, and Dataproc"
   perimeter_type = "PERIMETER_TYPE_REGULAR"
