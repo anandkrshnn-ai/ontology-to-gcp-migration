@@ -104,4 +104,16 @@ terraform apply -var="project_id=YOUR_PROJECT_ID"
 ## Project Structure
 *   `docs/`: Contains the detailed technical playbooks and the [Execution Toolkit](./docs/EXECUTION_TOOLKIT.md) for running the automation engines.
 *   `scripts/`: Contains the Python automation engines (Metadata Scrapers, Schema Converters, API Proxies) required to operationalize the migration.
-*   `terraform/`: Contains the IaC to provision the GCP landing zone.
+*   `terraform/`: Contains the IaC to provision the GCP landing zone, including the Spanner Graph platform.
+*   `.github/workflows/`: Contains the Cloud Build validation and approval-gated apply pipelines.
+
+## Identity and Access Management (IAM)
+To support the automated Control Plane for the Ontology-to-Graph pipeline, you must configure two dedicated service accounts:
+1.  **`ontology-ci-plan@your-gcp-project-id.iam.gserviceaccount.com`**
+    *   **Role:** Viewer / Metadata Reader
+    *   **Purpose:** Executes the PR validation and `plan` pipeline to ensure schema changes are safe.
+2.  **`ontology-cd-apply@your-gcp-project-id.iam.gserviceaccount.com`**
+    *   **Role:** Spanner Database Admin, Storage Admin
+    *   **Purpose:** Executes the approval-gated `apply` pipeline to deploy `CREATE OR REPLACE PROPERTY GRAPH` changes.
+
+Ensure these accounts are bound to your GitHub Actions Workload Identity Provider.

@@ -30,3 +30,12 @@ module "data_foundation" {
   primary_region = var.primary_region
   environment    = "prod"
 }
+
+module "spanner_database" {
+  source           = "../../modules/spanner"
+  project_id       = var.project_id
+  region           = var.primary_region
+  instance_name    = "ontology-graph-platform-prod"
+  database_name    = "ontology_graph_platform"
+  processing_units = 1000
+}

@@ -1,0 +1,47 @@
+name: Ontology-to-Graph PR Plan
+on:
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - 'ontology/**'
+      - 'orchestrator/**'
+
+jobs:
+  validate-and-plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          # Placeholder: Replace with actual Workload Identity Provider
+          workload_identity_provider: 'projects/123456789/locations/global/workloadIdentityPools/my-pool/providers/my-provider'
+          service_account: 'ontology-ci-plan@your-gcp-project-id.iam.gserviceaccount.com'
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install Orchestrator Dependencies
+        run: pip install -r orchestrator/requirements.txt
+        # (Assuming orchestrator is built in Phase 1)
+
+      - name: Run Schema Validation & Plan
+        run: |
+          echo "Running orchestrator in PLAN mode..."
+          # python orchestrator/orchestrator.py --mode plan --ontology-dir ontology/
+          echo "Plan generated. Attach artifact for review."
+
+      - name: Output Plan Artifact
+        run: |
+          echo "Plan artifact ready."
