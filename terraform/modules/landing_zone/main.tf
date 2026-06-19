@@ -22,7 +22,7 @@ resource "google_compute_network" "shared_vpc" {
 }
 
 resource "google_compute_subnetwork" "data_subnet" {
-  name                     = "subnet-data-processing"
+  name                     = "subnet-data-processing-unique"
   ip_cidr_range            = "10.0.1.0/24"
   region                   = var.primary_region
   network                  = google_compute_network.shared_vpc.id
@@ -30,7 +30,7 @@ resource "google_compute_subnetwork" "data_subnet" {
 }
 
 resource "google_compute_subnetwork" "apps_subnet" {
-  name                     = "subnet-apps-actions"
+  name                     = "subnet-apps-actions-unique"
   ip_cidr_range            = "10.0.2.0/24"
   region                   = var.primary_region
   network                  = google_compute_network.shared_vpc.id

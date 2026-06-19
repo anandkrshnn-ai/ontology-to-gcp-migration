@@ -44,7 +44,7 @@ module "spanner_database" {
   source           = "../../modules/spanner"
   project_id       = var.project_id
   region           = var.primary_region
-  instance_name    = "ontology-graph-platform"
-  database_name    = "ontology_graph_platform"
+  instance_name    = "ontology-graph-platform-unique"
+  database_name    = "ontology_graph_platform_unique"
   processing_units = 100
 }
