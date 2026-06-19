@@ -29,14 +29,14 @@ resource "google_compute_subnetwork" "apps_subnet" {
 }
 
 # Access Policy
-data "google_access_context_manager_access_policy" "org_policy" {
+data "google_access_context_manager_access_policies" "org_policies" {
   parent = "organizations/${var.org_id}"
 }
 
 # VPC Service Controls Perimeter
 resource "google_access_context_manager_service_perimeter" "palantir_data_perimeter" {
-  parent         = "accessPolicies/${data.google_access_context_manager_access_policy.org_policy.name}"
-  name           = "accessPolicies/${data.google_access_context_manager_access_policy.org_policy.name}/servicePerimeters/palantir_migration_perimeter"
+  parent         = "accessPolicies/${data.google_access_context_manager_access_policies.org_policies.access_policies[0].name}"
+  name           = "accessPolicies/${data.google_access_context_manager_access_policies.org_policies.access_policies[0].name}/servicePerimeters/palantir_migration_perimeter"
   title          = "Palantir Migration Data Perimeter"
   description    = "Prevents data exfiltration from BigQuery, GCS, and Dataproc"
   perimeter_type = "PERIMETER_TYPE_REGULAR"
