@@ -1,0 +1,15 @@
+{
+  "status": "BLOCKED_BREAKING",
+  "compatibility": "BREAKING",
+  "actions": [],
+  "migration_recipe": {
+    "entity": "network_routing",
+    "change_type": "BREAKING",
+    "manual_steps": [
+      "1. Coordinate with downstream product owners about incoming breaking changes.",
+      "2. Execute manual SQL statements to add compatability backfills or clone the Spanner tables.",
+      "3. Deploy a new parallel version of the Property Graph (e.g. GraphName_v2) to allow canary cutover.",
+      "4. Deprecate and safely drop the old Graph version after verify phase completion."
+    ]
+  }
+}

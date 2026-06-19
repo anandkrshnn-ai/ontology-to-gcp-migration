@@ -7,3 +7,5 @@ google-auth==2.29.0
 tenacity==8.3.0
 pydantic==2.7.1
 pytest==8.2.0
+google-cloud-spanner
+

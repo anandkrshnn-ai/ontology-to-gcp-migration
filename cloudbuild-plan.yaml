@@ -1,0 +1,60 @@
+# Native Cloud Build configuration for the validation/plan pipeline.
+# Triggered on Pull Requests to validate Terraform configurations and Ontology specifications.
+
+steps:
+  # 1. Run Python unit tests for the orchestrator/compiler logic
+  - name: 'python:3.11-slim'
+    id: 'run-python-tests'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        cd /workspace
+        export PYTHONPATH=/workspace
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        python -m pytest scripts/tests/ -v --tb=short
+
+  # 2. Run the orchestrator validation command on incoming YAML definitions
+  - name: 'python:3.11-slim'
+    id: 'validate-ontology-yaml'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        cd /workspace
+        export PYTHONPATH=/workspace
+        pip install -r requirements.txt
+        python -m scripts.orchestrator --action validate --source pilots/logistics_sla_monitor/
+
+  # 3. Initialize Terraform
+  - name: 'hashicorp/terraform:1.6.0'
+    id: 'terraform-init'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        cd terraform/envs/dev
+        terraform init -backend=false
+
+  # 4. Validate Terraform
+  - name: 'hashicorp/terraform:1.6.0'
+    id: 'terraform-validate'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        cd terraform/envs/dev
+        terraform validate
+
+  # 5. Run Terraform Plan (Dry-run configuration)
+  - name: 'hashicorp/terraform:1.6.0'
+    id: 'terraform-plan'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        cd terraform/envs/dev
+        terraform plan -var="project_id=placeholder-project" -var="region=us-central1"

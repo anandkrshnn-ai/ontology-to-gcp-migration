@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: RelationshipType
+metadata:
+  name: transit_path
+  description: "Relationship representing the active transit paths over routing segments."
+spec:
+  tableName: transit_path
+  sourceType: network_routing
+  targetType: network_routing_segment
+  primaryKey: path_id
+  properties:
+    path_id:
+      type: string
+      required: true
+    transit_mode:
+      type: string
+      required: true
+    avg_duration_hours:
+      type: double

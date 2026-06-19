@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ObjectType
+metadata:
+  name: network_routing
+  description: "Represents a network routing location or hub in the logistics network."
+spec:
+  primaryKey: node_id
+  tableName: network_routing
+  properties:
+    node_id:
+      type: string
+      required: true
+    name:
+      type: string
+      required: true
+    location_type:
+      type: string
+      required: true
+    latitude:
+      type: double
+    longitude:
+      type: double
+    capacity:
+      type: integer
+  relationships:
+    - name: transit_path
+      targetType: network_routing_segment
+      cardinality: ONE_TO_MANY
+      edgeType: transit_path

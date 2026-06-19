@@ -1,0 +1,34 @@
+# Native Cloud Build configuration for the deployment/apply pipeline.
+# Gated by manual approval in Cloud Build before execution.
+
+steps:
+  # 1. Initialize Terraform
+  - name: 'hashicorp/terraform:1.6.0'
+    id: 'terraform-init'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        cd terraform/envs/dev
+        terraform init -backend=false
+
+  # 2. Apply Terraform changes (infra provisioning)
+  - name: 'hashicorp/terraform:1.6.0'
+    id: 'terraform-apply'
+    entrypoint: 'sh'
+    args:
+      - '-c'
+      - |
+        cd terraform/envs/dev
+        terraform apply -auto-approve -var="project_id=placeholder-project" -var="region=us-central1"
+
+  # 3. Apply Ontology changes (ingestion + diffing + Spanner registry update)
+  # In later phases, this steps also triggers graph DDL compilation.
+  - name: 'python:3.11-slim'
+    id: 'apply-ontology-changes'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install -r requirements.txt
+        python -m scripts.orchestrator --action apply --source pilots/logistics_sla_monitor/

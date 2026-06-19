@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: PropertyGraph
+metadata:
+  name: logistics_routing_graph
+  description: "Property graph for logistics routing, connecting hubs and segments."
+spec:
+  graphName: LogisticsRoutingGraph
+  nodes:
+    - objectType: network_routing
+      tableName: network_routing
+      key: node_id
+      label: NetworkRouting
+    - objectType: network_routing_segment
+      tableName: network_routing_segment
+      key: segment_id
+      label: RoutingSegment
+    - objectType: operation
+      tableName: operation
+      key: operation_id
+      label: Operation
+  edges:
+    - relationshipType: transit_path
+      tableName: transit_path
+      label: TRANSIT_PATH
+      source:
+        nodeType: network_routing
+        key: node_id
+        foreignKey: origin_node_id
+      target:
+        nodeType: network_routing_segment
+        key: segment_id
+        foreignKey: segment_id

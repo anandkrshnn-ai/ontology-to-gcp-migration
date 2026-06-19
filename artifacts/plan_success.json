@@ -1,0 +1,11 @@
+{
+  "status": "APPROVED",
+  "compatibility": "VALID",
+  "actions": [
+    "CREATE OR REPLACE VIEW v_network_routing SQL SECURITY INVOKER AS \nSELECT node_id, name, location_type, latitude, longitude, capacity \nFROM network_routing;",
+    "CREATE OR REPLACE VIEW v_network_routing_segment SQL SECURITY INVOKER AS \nSELECT segment_id, origin_node_id, destination_node_id, distance_km, status \nFROM network_routing_segment;",
+    "CREATE OR REPLACE VIEW v_operation SQL SECURITY INVOKER AS \nSELECT operation_id, node_id, operation_type, operating_hours, active \nFROM operation;",
+    "CREATE OR REPLACE VIEW v_transit_path SQL SECURITY INVOKER AS \nSELECT path_id, transit_mode, avg_duration_hours \nFROM transit_path;",
+    "CREATE OR REPLACE PROPERTY GRAPH LogisticsRoutingGraph\n  NODE TABLES (\n    v_network_routing KEY (node_id) AS NetworkRouting,\n    v_network_routing_segment KEY (segment_id) AS RoutingSegment,\n    v_operation KEY (operation_id) AS Operation\n  )\n  EDGE TABLES (\n    v_transit_path\n      KEY (origin_node_id, segment_id)\n      SOURCE KEY (origin_node_id) REFERENCES v_network_routing (node_id)\n      DESTINATION KEY (segment_id) REFERENCES v_network_routing_segment (segment_id)\n      AS TRANSIT_PATH\n  );"
+  ]
+}

@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ObjectType
+metadata:
+  name: network_routing_segment
+  description: "Represents a segment connecting two routing hubs."
+spec:
+  primaryKey: segment_id
+  tableName: network_routing_segment
+  properties:
+    segment_id:
+      type: string
+      required: true
+    origin_node_id:
+      type: string
+      required: true
+    destination_node_id:
+      type: string
+      required: true
+    distance_km:
+      type: double
+    status:
+      type: string

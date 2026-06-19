@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ObjectType
+metadata:
+  name: operation
+  description: "Represents logistical operations performed at routing locations."
+spec:
+  primaryKey: operation_id
+  tableName: operation
+  properties:
+    operation_id:
+      type: string
+      required: true
+    node_id:
+      type: string
+      required: true
+    operation_type:
+      type: string
+      required: true
+    operating_hours:
+      type: string
+    active:
+      type: boolean
