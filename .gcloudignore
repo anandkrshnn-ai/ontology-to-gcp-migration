@@ -1,0 +1,6 @@
+# Keep git data out of the build context
+.git/
+.gitignore
+
+# Explicitly do NOT ignore tfvars files
+!terraform/envs/dev/terraform.tfvars
