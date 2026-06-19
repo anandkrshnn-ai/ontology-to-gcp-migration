@@ -9,12 +9,8 @@ steps:
     args:
       - '-c'
       - |
-        set -e
-        cd /workspace
-        export PYTHONPATH=/workspace
-        python -m pip install --upgrade pip
         pip install -r requirements.txt
-        python -m pytest scripts/tests/ -v --tb=short
+        PYTHONPATH=/workspace pytest scripts/tests/ -v
 
   # 2. Run the orchestrator validation command on incoming YAML definitions
   - name: 'python:3.11-slim'
