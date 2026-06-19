@@ -57,4 +57,4 @@ steps:
       - '-c'
       - |
         cd terraform/envs/dev
-        terraform plan -var="project_id=placeholder-project" -var="region=us-central1"
+        terraform plan -var-file="terraform.tfvars" -input=false
