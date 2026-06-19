@@ -1,4 +1,5 @@
-primary_region     = "us-central1"
-org_id             = "804632275580"
 project_id         = "migiration-demo"
+primary_region     = "us-central1"
+secondary_region   = "europe-west4"
+org_id             = "804632275580"
 access_policy_name = ""
