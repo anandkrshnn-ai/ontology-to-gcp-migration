@@ -10,7 +10,7 @@ steps:
       - '-c'
       - |
         cd terraform/envs/dev
-        terraform init -backend=false
+        terraform init
 
   # 2. Apply Terraform changes (infra provisioning)
   - name: 'hashicorp/terraform:1.9.8'
