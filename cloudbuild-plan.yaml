@@ -30,7 +30,7 @@ steps:
         python -m scripts.orchestrator --action validate --source pilots/logistics_sla_monitor/
 
   # 3. Initialize Terraform
-  - name: 'hashicorp/terraform:1.6.0'
+  - name: 'hashicorp/terraform:1.9.8'
     id: 'terraform-init'
     entrypoint: 'sh'
     args:
@@ -40,7 +40,7 @@ steps:
         terraform init -backend=false
 
   # 4. Validate Terraform
-  - name: 'hashicorp/terraform:1.6.0'
+  - name: 'hashicorp/terraform:1.9.8'
     id: 'terraform-validate'
     entrypoint: 'sh'
     args:
@@ -50,7 +50,7 @@ steps:
         terraform validate
 
   # 5. Run Terraform Plan (Dry-run configuration)
-  - name: 'hashicorp/terraform:1.6.0'
+  - name: 'hashicorp/terraform:1.9.8'
     id: 'terraform-plan'
     entrypoint: 'sh'
     args:

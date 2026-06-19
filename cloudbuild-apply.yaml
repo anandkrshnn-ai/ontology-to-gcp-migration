@@ -3,7 +3,7 @@
 
 steps:
   # 1. Initialize Terraform
-  - name: 'hashicorp/terraform:1.6.0'
+  - name: 'hashicorp/terraform:1.9.8'
     id: 'terraform-init'
     entrypoint: 'sh'
     args:
@@ -13,7 +13,7 @@ steps:
         terraform init -backend=false
 
   # 2. Apply Terraform changes (infra provisioning)
-  - name: 'hashicorp/terraform:1.6.0'
+  - name: 'hashicorp/terraform:1.9.8'
     id: 'terraform-apply'
     entrypoint: 'sh'
     args:
