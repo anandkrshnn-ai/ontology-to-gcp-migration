@@ -27,25 +27,28 @@ resource "google_storage_bucket" "data_lake" {
 
 # 2. BigQuery Dataset
 resource "google_bigquery_dataset" "ontology_dataset" {
-  dataset_id                  = "palantir_ontology_${var.environment}"
+  dataset_id                  = "palantir_ontology_${var.environment}_unique"
   friendly_name               = "Palantir Ontology (${var.environment})"
   description                 = "Core semantic layer and structured data"
   location                    = var.primary_region
+  project                     = var.project_id
   delete_contents_on_destroy  = var.environment == "dev" ? true : false
   default_table_expiration_ms = var.environment == "dev" ? 2592000000 : null # 30 days in dev, infinite in prod
 }
 
 # 3. Data Catalog Taxonomy
 resource "google_data_catalog_taxonomy" "security_markings" {
-  display_name           = "Palantir Security Markings (${var.environment})"
+  display_name           = "Palantir Security Markings ${var.environment}"
   description            = "Taxonomy for migrating Palantir data classification markings"
   region                 = var.primary_region
+  project                = var.project_id
   activated_policy_types = ["FINE_GRAINED_ACCESS_CONTROL"]
 }
 
 # 4. Pub/Sub Topic
 resource "google_pubsub_topic" "magritte_stream" {
-  name = "magritte-replacement-stream-${var.environment}"
+  name    = "magritte-replacement-stream-${var.environment}-unique"
+  project = var.project_id
 }
 
 # 5. Cloud Composer (Orchestration)

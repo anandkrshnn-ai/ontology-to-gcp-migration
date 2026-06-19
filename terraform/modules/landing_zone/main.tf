@@ -15,7 +15,7 @@ locals {
 }
 
 resource "google_compute_network" "shared_vpc" {
-  name                    = "vpc-enterprise-palantir-migration"
+  name                    = "vpc-enterprise-palantir-migration-unique"
   auto_create_subnetworks = false
   project                 = var.project_id
   description             = "Central Shared VPC for all migrated Palantir workloads"
