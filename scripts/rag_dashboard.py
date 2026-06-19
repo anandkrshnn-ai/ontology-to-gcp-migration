@@ -88,6 +88,11 @@ conn_mode = st.sidebar.radio(
     ["Simulated (Mocked)", "Live Google Cloud Spanner"]
 )
 
+# Gemini API Key Setup in Sidebar
+st.sidebar.markdown("---")
+st.sidebar.subheader("🤖 GenAI Configuration")
+gemini_key = st.sidebar.text_input("Gemini API Key:", type="password", value=os.environ.get("GEMINI_API_KEY", ""))
+
 spanner_project = ""
 spanner_instance = ""
 spanner_database = ""
@@ -410,25 +415,59 @@ with tab3:
         
         # Build context
         context_payload = (
-            f"--- UNSTRUCTURED DOCUMENT EVIDENCE ---\n"
-            f"{matched['text']}\n\n"
-            f"--- STRUCTURED GRAPH RETRIEVED RELATIONSHIPS ---\n"
-            f"Hub Node: {graph_expansion['start_node']['details']['name']} (Capacity: {graph_expansion['start_node']['details']['capacity']})\n"
-            f"Segment Link: {graph_expansion['connections'][0]['target_segment_id']} (Transit Mode: {graph_expansion['connections'][0]['transit_mode']}, Average Duration: {graph_expansion['connections'][0]['avg_duration_hours']} hours, Status: {graph_expansion['connections'][0]['segment_details']['status']})\n"
+            f"--- SYSTEM MIGRATION CONTEXT EVIDENCE ---\n"
+            f"Unstructured Log Evidence:\n{matched['text']}\n\n"
+            f"Structured Spanner Graph Traversal:\n"
+            f"- Starting Hub Node: {graph_expansion['start_node']['details']['name']} (ID: {graph_expansion['start_node']['id']}, Capacity: {graph_expansion['start_node']['details']['capacity']})\n"
+            f"- Connected Segment: {graph_expansion['connections'][0]['target_segment_id']} (Transit Mode: {graph_expansion['connections'][0]['transit_mode']}, Average Duration: {graph_expansion['connections'][0]['avg_duration_hours']} hours, Status: {graph_expansion['connections'][0]['segment_details']['status']})\n"
         )
         
         with st.expander("Show Assembled Context Window Payload"):
             st.text(context_payload)
             
         st.markdown("**Synthesized Answer:**")
-        answer_text = (
-            f"Based on the combined evidence:\n\n"
-            f"1. Unstructured logs reveal that the **{graph_expansion['start_node']['details']['name']}** (CHI-NODE-01) "
-            f"is experiencing power fluctuations causing a 40% operational capacity reduction (temporary capacity reduced to 720 units).\n"
-            f"2. Spanner Graph paths reveal that this hub connects to segment **{graph_expansion['connections'][0]['target_segment_id']}** "
-            f"via **{graph_expansion['connections'][0]['transit_mode']}** with an average duration of **{graph_expansion['connections'][0]['avg_duration_hours']} hours**.\n"
-            f"3. The connection is currently **{graph_expansion['connections'][0]['segment_details']['status']}**.\n\n"
-            f"*Conclusion*: Logistics delays should be expected at Chicago Hub, but downstream transit connections remain healthy."
-        )
-        st.success(answer_text)
+        
+        if gemini_key:
+            with st.spinner("Synthesizing answer using Google Gemini..."):
+                try:
+                    import google.generativeai as genai
+                    genai.configure(api_key=gemini_key)
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    
+                    prompt = (
+                        f"You are a helpful logistics and infrastructure database assistant. Answer the user query using ONLY the provided contexts.\n\n"
+                        f"Context details:\n{context_payload}\n\n"
+                        f"User Query: {active_query}\n\n"
+                        f"Answer:"
+                    )
+                    
+                    response = model.generate_content(prompt)
+                    st.success(response.text)
+                except Exception as gemini_err:
+                    st.error(f"Gemini API invocation failed: {gemini_err}")
+                    st.warning("Falling back to pre-compiled context generator.")
+                    # Fallback to local static answer template
+                    answer_text = (
+                        f"Based on the combined evidence:\n\n"
+                        f"1. Unstructured logs reveal that the **{graph_expansion['start_node']['details']['name']}** (CHI-NODE-01) "
+                        f"is experiencing power fluctuations causing a 40% operational capacity reduction (temporary capacity reduced to 720 units).\n"
+                        f"2. Spanner Graph paths reveal that this hub connects to segment **{graph_expansion['connections'][0]['target_segment_id']}** "
+                        f"via **{graph_expansion['connections'][0]['transit_mode']}** with an average duration of **{graph_expansion['connections'][0]['avg_duration_hours']} hours**.\n"
+                        f"3. The connection is currently **{graph_expansion['connections'][0]['segment_details']['status']}**.\n\n"
+                        f"*Conclusion*: Logistics delays should be expected at Chicago Hub, but downstream transit connections remain healthy."
+                    )
+                    st.success(answer_text)
+        else:
+            st.info("💡 Pro-Tip: Provide your Gemini API Key in the sidebar to generate live synthesized answers.")
+            # Fallback to local static answer template
+            answer_text = (
+                f"Based on the combined evidence:\n\n"
+                f"1. Unstructured logs reveal that the **{graph_expansion['start_node']['details']['name']}** (CHI-NODE-01) "
+                f"is experiencing power fluctuations causing a 40% operational capacity reduction (temporary capacity reduced to 720 units).\n"
+                f"2. Spanner Graph paths reveal that this hub connects to segment **{graph_expansion['connections'][0]['target_segment_id']}** "
+                f"via **{graph_expansion['connections'][0]['transit_mode']}** with an average duration of **{graph_expansion['connections'][0]['avg_duration_hours']} hours**.\n"
+                f"3. The connection is currently **{graph_expansion['connections'][0]['segment_details']['status']}**.\n\n"
+                f"*Conclusion*: Logistics delays should be expected at Chicago Hub, but downstream transit connections remain healthy."
+            )
+            st.success(answer_text)
     st.markdown("</div>", unsafe_allow_html=True)
