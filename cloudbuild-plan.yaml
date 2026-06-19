@@ -33,7 +33,7 @@ steps:
       - '-c'
       - |
         cd terraform/envs/dev
-        terraform init -backend=false
+        terraform init
 
   # 4. Validate Terraform
   - name: 'hashicorp/terraform:1.9.8'
