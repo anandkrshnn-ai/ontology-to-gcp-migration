@@ -7,7 +7,8 @@ variable "environment" {
 
 # 1. Google Cloud Storage
 resource "google_storage_bucket" "data_lake" {
-  name                        = "${var.project_id}-data-lake-${var.environment}"
+  # Using a unique suffix to resolve global namespace conflict
+  name                        = "${var.project_id}-data-lake-${var.environment}-unique"
   location                    = var.primary_region
   force_destroy               = var.environment == "dev" ? true : false
   uniform_bucket_level_access = true

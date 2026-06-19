@@ -15,13 +15,22 @@ provider "google" {
 
 variable "project_id" {}
 variable "primary_region" {}
+variable "secondary_region" {
+  type    = string
+  default = ""
+}
 variable "org_id" {}
+variable "access_policy_name" {
+  type    = string
+  default = ""
+}
 
 module "landing_zone" {
-  source         = "../../modules/landing_zone"
-  project_id     = var.project_id
-  primary_region = var.primary_region
-  org_id         = var.org_id
+  source             = "../../modules/landing_zone"
+  project_id         = var.project_id
+  primary_region     = var.primary_region
+  org_id             = var.org_id
+  access_policy_name = var.access_policy_name
 }
 
 module "data_foundation" {
