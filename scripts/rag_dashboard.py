@@ -51,16 +51,23 @@ class VertexAIVectorStore:
             self.enabled = False
             self.embeddings = {doc["id"]: np.random.rand(768) for doc in self.documents}
 
-    def semantic_search(self, query: str, top_k: int = 1) -> list:
+    def _embed_text(self, text: str) -> np.ndarray:
+        """Embed a single string using Vertex AI, falling back to rand(768) on failure."""
         if self.enabled:
             try:
-                query_emb = np.array(self.model.get_embeddings([query])[0].values)
-            except Exception as e:
-                st.error(f"Vertex AI embedding generation failed for query: {e}")
-                query_emb = np.random.rand(768)
-        else:
-            query_emb = np.random.rand(768)
-            
+                return np.array(self.model.get_embeddings([text])[0].values)
+            except Exception:
+                pass
+        return np.random.rand(768)
+
+    def add_document(self, doc: dict) -> None:
+        """Append a document and embed it with the same model used at init time."""
+        self.documents.append(doc)
+        self.embeddings[doc["id"]] = self._embed_text(doc["text"])
+
+    def semantic_search(self, query: str, top_k: int = 1) -> list:
+        query_emb = self._embed_text(query)
+
         scores = []
         for doc_id, doc_vector in self.embeddings.items():
             dot_product = np.dot(query_emb, doc_vector)
@@ -375,13 +382,13 @@ with tab2:
         target_entity = st.selectbox("Link to Entity:", ["network_routing", "network_routing_segment"])
         
         if st.button("Index Document"):
-            st.session_state.vector_store.documents.append({
+            new_doc = {
                 "id": new_id,
                 "text": new_text,
                 "entities": {target_entity: target_entity}
-            })
-            # Generate mock embedding
-            st.session_state.vector_store.embeddings[new_id] = np.random.rand(128)
+            }
+            with st.spinner("Embedding document..."):
+                st.session_state.vector_store.add_document(new_doc)
             st.success(f"Successfully chunked and indexed {new_id} to Vector Search.")
         st.markdown("</div>", unsafe_allow_html=True)
 
