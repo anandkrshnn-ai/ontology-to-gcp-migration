@@ -1,19 +1,30 @@
-apiVersion: v1
-kind: RelationshipType
+apiVersion: routing.ontology/v1
+kind: ObjectType
 metadata:
-  name: transit_path
-  description: "Relationship representing the active transit paths over routing segments."
+  name: TransitPath
+  domain: Air
+  version: 1.2.0
+  steward: network-planning-ontology-team
+  description: A sequence of linehaul legs that satisfies an NR Segment.
 spec:
-  tableName: transit_path
-  sourceType: network_routing
-  targetType: network_routing_segment
-  primaryKey: path_id
-  properties:
-    path_id:
-      type: string
+  table: transit_path
+  primaryKey: [transit_path_id]
+  attributes:
+    - name: transit_path_id
+      type: STRING(64)
       required: true
-    transit_mode:
-      type: string
+    - name: segment_id
+      type: STRING(64)
       required: true
-    avg_duration_hours:
-      type: double
+    - name: total_transit_minutes
+      type: INT64
+  relationships:
+    - name: satisfies_segment
+      edge: SATISFIES
+      target: NetworkRoutingSegment
+      cardinality: many_to_one
+      via: { localKey: segment_id, targetKey: segment_id }
+  rules:
+    - id: TP-001
+      expression: total_transit_minutes IS NULL OR total_transit_minutes > 0
+      severity: reject

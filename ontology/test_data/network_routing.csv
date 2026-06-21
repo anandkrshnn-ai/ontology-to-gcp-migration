@@ -1,0 +1,5 @@
+routing_id,origin_operation_id,destination_operation_id,service_commit,zulu_day
+NR-001,OAK-STN,DAL-STN,2-DAY,2026-06-18
+NR-002,OAK-STN,ORD-STN,2-DAY,2026-06-18
+NR-003,MEM-HUB,SEA-STN,OVERNIGHT,2026-06-19
+NR-004,ORD-STN,DAL-STN,2-DAY,2026-06-19

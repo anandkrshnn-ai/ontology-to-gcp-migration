@@ -30,6 +30,41 @@ class GraphCompiler:
         self.compatibility_status = compatibility_status  # ADDITIVE, COMPATIBLE, BREAKING
         self.schema_diffs = schema_diffs
 
+    def _normalise_spec(self, entity_yaml: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalises both old (properties dict) and new (attributes list) YAML formats."""
+        spec = entity_yaml.get("spec", {})
+        
+        # Support real ontology format: attributes as list
+        if "attributes" in spec and "properties" not in spec:
+            props = {}
+            for attr in spec.get("attributes", []):
+                props[attr["name"]] = {
+                    "type": attr.get("type", "STRING(MAX)"),
+                    "required": attr.get("required", False)
+                }
+            spec = dict(spec)
+            spec["properties"] = props
+        
+        # Support real ontology: "table" -> "tableName"
+        if "table" in spec and "tableName" not in spec:
+            spec = dict(spec)
+            spec["tableName"] = spec["table"]
+        
+        # Support real ontology: primaryKey as list -> string
+        pk = spec.get("primaryKey")
+        if isinstance(pk, list) and len(pk) > 0:
+            spec = dict(spec)
+            spec["primaryKey"] = pk[0]
+        
+        # Force storage mode to managed_by_platform for real ontology
+        if "storage" not in spec:
+            spec = dict(spec)
+            spec["storage"] = {"mode": "managed_by_platform"}
+        
+        entity_yaml = dict(entity_yaml)
+        entity_yaml["spec"] = spec
+        return entity_yaml
+
     def should_gate_build(self) -> bool:
         """
         Returns True if the build must be halted due to breaking schema evolution policies.
@@ -42,6 +77,7 @@ class GraphCompiler:
         Generates Spanner physical CREATE TABLE DDL if storage mode is 'managed_by_platform'.
         Otherwise, returns empty string assuming external table creation ownership.
         """
+        entity_yaml = self._normalise_spec(entity_yaml)
         spec = entity_yaml.get("spec", {})
         name = entity_yaml["metadata"]["name"]
         table_name = spec.get("tableName")
@@ -68,6 +104,10 @@ class GraphCompiler:
                 spanner_type = "BOOL"
             elif prop_type == "JSON":
                 spanner_type = "JSON"
+            elif prop_type in ["DATE", "NUMERIC", "INT64", "TIMESTAMP", "BOOL", "FLOAT64"]:
+                spanner_type = prop_type
+            elif prop_type.startswith("STRING("):
+                spanner_type = prop_type
 
             required = " NOT NULL" if prop_def.get("required", False) else ""
             columns.append(f"    {prop_name} {spanner_type}{required}")
@@ -81,6 +121,7 @@ class GraphCompiler:
         All Spanner Graph nodes/edges traverse through these views by default to isolate 
         internal schemas, perform cast-normalizations, and avoid query disruption.
         """
+        entity_yaml = self._normalise_spec(entity_yaml)
         spec = entity_yaml.get("spec", {})
         name = entity_yaml["metadata"]["name"]
         table_name = spec.get("tableName")

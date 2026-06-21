@@ -46,13 +46,13 @@ class OntologyParser:
         if kind == "ObjectType":
             if "primaryKey" not in spec:
                 raise OntologyValidationError(f"ObjectType spec must define 'primaryKey' in {file_path}")
-            if "tableName" not in spec:
-                raise OntologyValidationError(f"ObjectType spec must define 'tableName' in {file_path}")
-            if "properties" not in spec:
-                raise OntologyValidationError(f"ObjectType spec must define 'properties' in {file_path}")
+            if "tableName" not in spec and "table" not in spec:
+                raise OntologyValidationError(f"ObjectType spec must define 'tableName' or 'table' in {file_path}")
+            if "properties" not in spec and "attributes" not in spec:
+                raise OntologyValidationError(f"ObjectType spec must define 'properties' or 'attributes' in {file_path}")
         elif kind == "RelationshipType":
-            if "tableName" not in spec:
-                raise OntologyValidationError(f"RelationshipType spec must define 'tableName' in {file_path}")
+            if "tableName" not in spec and "table" not in spec:
+                raise OntologyValidationError(f"RelationshipType spec must define 'tableName' or 'table' in {file_path}")
             if "sourceType" not in spec:
                 raise OntologyValidationError(f"RelationshipType spec must define 'sourceType' in {file_path}")
             if "targetType" not in spec:
@@ -60,12 +60,56 @@ class OntologyParser:
             if "primaryKey" not in spec:
                 raise OntologyValidationError(f"RelationshipType spec must define 'primaryKey' in {file_path}")
         elif kind == "PropertyGraph":
-            if "graphName" not in spec:
-                raise OntologyValidationError(f"PropertyGraph spec must define 'graphName' in {file_path}")
+            # For PropertyGraph, support either graphName or graph
+            if "graphName" not in spec and "graph" not in spec:
+                raise OntologyValidationError(f"PropertyGraph spec must define 'graphName' or 'graph' in {file_path}")
             if "nodes" not in spec:
                 raise OntologyValidationError(f"PropertyGraph spec must define 'nodes' in {file_path}")
             if "edges" not in spec:
                 raise OntologyValidationError(f"PropertyGraph spec must define 'edges' in {file_path}")
+
+    @staticmethod
+    def normalise(entity_yaml: Dict[str, Any]) -> Dict[str, Any]:
+        spec = entity_yaml.get("spec", {})
+        kind = entity_yaml.get("kind")
+        
+        if kind == "ObjectType":
+            # Support real ontology format: attributes as list
+            if "attributes" in spec and "properties" not in spec:
+                props = {}
+                for attr in spec.get("attributes", []):
+                    props[attr["name"]] = {
+                        "type": attr.get("type", "STRING(MAX)"),
+                        "required": attr.get("required", False)
+                    }
+                spec = dict(spec)
+                spec["properties"] = props
+            
+            # Support real ontology: "table" -> "tableName"
+            if "table" in spec and "tableName" not in spec:
+                spec = dict(spec)
+                spec["tableName"] = spec["table"]
+            
+            # Support real ontology: primaryKey as list -> string
+            pk = spec.get("primaryKey")
+            if isinstance(pk, list) and len(pk) > 0:
+                spec = dict(spec)
+                spec["primaryKey"] = pk[0]
+            
+            # Force storage mode to managed_by_platform for real ontology
+            if "storage" not in spec:
+                spec = dict(spec)
+                spec["storage"] = {"mode": "managed_by_platform"}
+                
+        elif kind == "PropertyGraph":
+            # Support real ontology: "graph" -> "graphName"
+            if "graph" in spec and "graphName" not in spec:
+                spec = dict(spec)
+                spec["graphName"] = spec["graph"]
+                
+        entity_yaml = dict(entity_yaml)
+        entity_yaml["spec"] = spec
+        return entity_yaml
 
 
 class DiffEngine:
@@ -237,6 +281,7 @@ class Orchestrator:
                 path = os.path.join(source_dir, file_name)
                 data = OntologyParser.load_yaml(path)
                 OntologyParser.validate_structure(data, path)
+                data = OntologyParser.normalise(data)
                 validated_files.append((path, data))
         return validated_files
 

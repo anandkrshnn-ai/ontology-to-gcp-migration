@@ -1,22 +1,25 @@
-apiVersion: v1
+apiVersion: routing.ontology/v1
 kind: ObjectType
 metadata:
-  name: operation
-  description: "Represents logistical operations performed at routing locations."
+  name: Operation
+  domain: Air
+  version: 1.0.0
+  steward: network-planning-ontology-team
+  description: An operational facility a segment originates at or terminates at.
 spec:
-  primaryKey: operation_id
-  tableName: operation
-  properties:
-    operation_id:
-      type: string
+  table: operation
+  primaryKey: [operation_id]
+  attributes:
+    - name: operation_id
+      type: STRING(64)
       required: true
-    node_id:
-      type: string
-      required: true
-    operation_type:
-      type: string
-      required: true
-    operating_hours:
-      type: string
-    active:
-      type: boolean
+    - name: operation_type
+      type: STRING(16)
+      enum: [STATION, RAMP, HUB, GATEWAY]
+    - name: location_code
+      type: STRING(16)
+  relationships: []
+  rules:
+    - id: OP-001
+      expression: "operation_type IN ('STATION','RAMP','HUB','GATEWAY')"
+      severity: warn

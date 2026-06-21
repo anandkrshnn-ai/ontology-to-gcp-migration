@@ -1,29 +1,41 @@
-apiVersion: v1
+apiVersion: routing.ontology/v1
 kind: ObjectType
 metadata:
-  name: network_routing
-  description: "Represents a network routing location or hub in the logistics network."
+  name: NetworkRouting
+  domain: Air
+  version: 1.2.0
+  steward: network-planning-ontology-team
+  description: A complete origin-to-destination routing through the network.
 spec:
-  primaryKey: node_id
-  tableName: network_routing
-  properties:
-    node_id:
-      type: string
+  table: network_routing
+  primaryKey: [routing_id]
+  attributes:
+    - name: routing_id
+      type: STRING(64)
       required: true
-    name:
-      type: string
+    - name: origin_operation_id
+      type: STRING(64)
       required: true
-    location_type:
-      type: string
+    - name: destination_operation_id
+      type: STRING(64)
       required: true
-    latitude:
-      type: double
-    longitude:
-      type: double
-    capacity:
-      type: integer
+    - name: service_commit
+      type: STRING(16)
+    - name: zulu_day
+      type: DATE
+      required: true
   relationships:
-    - name: transit_path
-      targetType: network_routing_segment
-      cardinality: ONE_TO_MANY
-      edgeType: transit_path
+    - name: has_segments
+      edge: HAS_SEGMENT
+      target: NetworkRoutingSegment
+      cardinality: one_to_many
+      via: { localKey: routing_id, targetKey: routing_id }
+  rules:
+    - id: NR-001
+      description: Origin and destination must differ.
+      expression: origin_operation_id != destination_operation_id
+      severity: reject
+    - id: NR-002
+      description: A routing must have at least one segment.
+      expression: COUNT(has_segments) >= 1
+      severity: reject
