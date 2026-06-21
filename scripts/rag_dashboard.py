@@ -300,8 +300,7 @@ with tab1:
                             
                             compiler = GraphCompiler(
                                 compatibility_status=plan_info["status"], 
-                                schema_diffs=plan_info["schema_diffs"],
-                                skip_graph_ddl=is_live
+                                schema_diffs=plan_info["schema_diffs"]
                             )
                             compilation_plan = compiler.compile_plan(yamls_list, graph_yaml)
                             

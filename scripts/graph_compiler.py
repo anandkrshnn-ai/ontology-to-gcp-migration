@@ -26,10 +26,9 @@ class GraphCompiler:
     (CREATE OR REPLACE PROPERTY GRAPH).
     """
 
-    def __init__(self, compatibility_status: str, schema_diffs: Dict[str, Any], skip_graph_ddl: bool = False):
+    def __init__(self, compatibility_status: str, schema_diffs: Dict[str, Any]):
         self.compatibility_status = compatibility_status  # ADDITIVE, COMPATIBLE, BREAKING
         self.schema_diffs = schema_diffs
-        self.skip_graph_ddl = skip_graph_ddl
 
     def _normalise_spec(self, entity_yaml: Dict[str, Any]) -> Dict[str, Any]:
         """Normalises both old (properties dict) and new (attributes list) YAML formats."""
@@ -235,8 +234,8 @@ class GraphCompiler:
                 if view_ddl:
                     actions.append(view_ddl)
                     
-        # 3. Generate Property Graph DDL (skip if skip_graph_ddl is enabled for Spanner Standard compatibility)
-        if graph_yaml and not self.skip_graph_ddl:
+        # 3. Generate Property Graph DDL
+        if graph_yaml:
             graph_ddl = self.generate_property_graph_ddl(graph_yaml)
             actions.append(graph_ddl)
             
