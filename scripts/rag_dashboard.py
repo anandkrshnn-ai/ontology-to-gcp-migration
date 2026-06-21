@@ -12,6 +12,75 @@ from scripts.orchestrator import SpannerRegistryManager, Orchestrator
 from scripts.graph_compiler import GraphCompiler
 from scripts.run_ontology_to_graph_rag_demo import MockVectorStore, SpannerGraphSimulator
 
+try:
+    import vertexai
+    from vertexai.generative_models import GenerativeModel
+    from vertexai.language_models import TextEmbeddingModel
+except ImportError:
+    pass
+
+class VertexAIVectorStore:
+    """Uses Vertex AI Text Embeddings model to generate real embeddings and perform semantic search."""
+    def __init__(self, project: str, location: str):
+        self.documents = [
+            {
+                "id": "doc_chunk_1",
+                "text": "Incident Report: OAK-STN origin station is experiencing severe gate congestion today due to local power fluctuations. Segments originating from OAK may suffer dispatch delays.",
+                "entities": {"routing_id": "NR-001"}
+            },
+            {
+                "id": "doc_chunk_2",
+                "text": "Maintenance Log: The air corridor segment SEG-002 from OAK-RAMP to MEM-HUB is running smoothly. Average duration remains constant.",
+                "entities": {"segment_id": "SEG-002"}
+            },
+            {
+                "id": "doc_chunk_3",
+                "text": "Telemetry alert: High wind warnings are currently active along the transit corridor between Chicago and Dallas segments.",
+                "entities": {"segment_id": "SEG-002"}
+            }
+        ]
+        try:
+            vertexai.init(project=project, location=location)
+            self.model = TextEmbeddingModel.from_pretrained("text-embedding-004")
+            texts = [doc["text"] for doc in self.documents]
+            embeddings = self.model.get_embeddings(texts)
+            self.embeddings = {doc["id"]: np.array(emb.values) for doc, emb in zip(self.documents, embeddings)}
+            self.enabled = True
+        except Exception as e:
+            st.error(f"Failed to initialize Vertex AI TextEmbeddingModel: {e}")
+            self.enabled = False
+            self.embeddings = {doc["id"]: np.random.rand(768) for doc in self.documents}
+
+    def semantic_search(self, query: str, top_k: int = 1) -> list:
+        if self.enabled:
+            try:
+                query_emb = np.array(self.model.get_embeddings([query])[0].values)
+            except Exception as e:
+                st.error(f"Vertex AI embedding generation failed for query: {e}")
+                query_emb = np.random.rand(768)
+        else:
+            query_emb = np.random.rand(768)
+            
+        scores = []
+        for doc_id, doc_vector in self.embeddings.items():
+            dot_product = np.dot(query_emb, doc_vector)
+            norm_q = np.linalg.norm(query_emb)
+            norm_d = np.linalg.norm(doc_vector)
+            score = dot_product / (norm_q * norm_d) if (norm_q > 0 and norm_d > 0) else 0.0
+            scores.append((doc_id, score))
+            
+        scores.sort(key=lambda x: x[1], reverse=True)
+        results = []
+        for i in range(min(top_k, len(scores))):
+            doc_id = scores[i][0]
+            doc = next(d for d in self.documents if d["id"] == doc_id)
+            results.append({
+                "document": doc,
+                "score": float(scores[i][1])
+            })
+        return results
+
+
 # Theme Configuration
 st.set_page_config(
     page_title="Palantir-to-GCP Migration Engine",
@@ -101,7 +170,7 @@ if conn_mode == "Live Google Cloud Spanner":
     st.sidebar.markdown("---")
     st.sidebar.subheader("Spanner Configuration")
     spanner_project = st.sidebar.text_input("GCP Project ID:", value=os.environ.get("GOOGLE_CLOUD_PROJECT", "migration-demo"))
-    spanner_instance = st.sidebar.text_input("Spanner Instance ID:", value="ontology-instance")
+    spanner_instance = st.sidebar.text_input("Spanner Instance ID:", value="ontology-demo")
     spanner_database = st.sidebar.text_input("Spanner Database ID:", value="ontology-db")
     
     st.sidebar.info("💡 Make sure you run 'terraform apply' or create the Spanner Instance & Database in your GCP Console first.")
@@ -141,6 +210,12 @@ if conn_mode == "Live Google Cloud Spanner":
 else:
     registry_manager = SpannerRegistryManager(mock=True)
     is_live = False
+
+# Reset vector store when switching connection modes to reload correct backend
+if "last_conn_mode" not in st.session_state or st.session_state.last_conn_mode != conn_mode:
+    st.session_state.last_conn_mode = conn_mode
+    if "vector_store" in st.session_state:
+        del st.session_state.vector_store
 
 # Tabs
 tab1, tab2, tab3 = st.tabs(["🎛️ Control Plane (Compiler)", "📥 Ingestion Zone (Telemetry)", "🔍 Serving Plane (GraphRAG)"])
@@ -271,7 +346,10 @@ with tab2:
     
     # Store dynamic text in session state
     if "vector_store" not in st.session_state:
-        st.session_state.vector_store = MockVectorStore()
+        if is_live:
+            st.session_state.vector_store = VertexAIVectorStore(project=spanner_project, location="us-central1")
+        else:
+            st.session_state.vector_store = MockVectorStore()
         
     with col_ing1:
         st.markdown("<div class='card'>", unsafe_allow_html=True)
@@ -333,16 +411,30 @@ with tab3:
                 graph_db = SpannerGraphSimulator()
                 graph_expansion = graph_db.execute_graph_expansion("NR-001")
             else:
-                # Real Spanner Graph query execution
+                # Real Spanner Graph query execution via Standard SQL JOIN (Spanner Standard compatibility)
                 try:
+                    from google.cloud import spanner
                     with registry_manager.spanner_db.snapshot() as snapshot:
-                        gql_query = (
-                            "GRAPH air_routing_graph "
-                            "MATCH (r:NetworkRouting {routing_id: 'NR-001'})-[e:HAS_SEGMENT]->(s:NetworkRoutingSegment) "
-                            "RETURN r.routing_id AS routing_id, r.service_commit AS service_commit, s.segment_id AS target_segment_id, s.transport_mode AS transport_mode, s.weight AS weight"
+                        sql_query = """
+                        SELECT
+                          r.routing_id,
+                          r.service_commit,
+                          s.segment_id,
+                          s.transport_mode,
+                          s.weight
+                        FROM v_network_routing r
+                        JOIN v_network_routing_segment s ON s.routing_id = r.routing_id
+                        WHERE r.routing_id = @routing_id
+                        ORDER BY s.segment_id
+                        """
+                        results = snapshot.execute_sql(
+                            sql_query,
+                            params={"routing_id": "NR-001"},
+                            param_types={"routing_id": spanner.param_types.STRING}
                         )
-                        results = snapshot.execute_sql(gql_query)
                         rows = list(results)
+                        
+                        st.caption("💡 Graph context retrieved via relational traversal (SQL JOIN). In production, this uses GQL on Spanner Enterprise.")
                         
                         if rows:
                             # Build response mapping matching Spanner Graph query schema
@@ -359,7 +451,7 @@ with tab3:
                                 } for row in rows]
                             }
                         else:
-                            st.warning("⚠️ No Spanner Graph query paths returned. Seeding simulated nodes into Spanner Graph to run...")
+                            st.warning("⚠️ No Spanner records returned. Seeding nodes to run the demo...")
                             
                             # Auto-seed basic data to make the live demo work instantly
                             def _seed_spanner(transaction):
@@ -386,8 +478,12 @@ with tab3:
                             registry_manager.spanner_db.run_in_transaction(_seed_spanner)
                             st.info("Successfully seeded demo data in Spanner! Re-running query...")
                             
-                            # Retry GQL query
-                            results = snapshot.execute_sql(gql_query)
+                            # Retry query
+                            results = snapshot.execute_sql(
+                                sql_query,
+                                params={"routing_id": "NR-001"},
+                                param_types={"routing_id": spanner.param_types.STRING}
+                            )
                             rows = list(results)
                             graph_expansion = {
                                 "start_node": {
@@ -402,8 +498,7 @@ with tab3:
                                 } for row in rows]
                             }
                 except Exception as ge:
-                    st.error(f"GCP Spanner Graph GQL Query failed: {ge}")
-                    st.info("Ensure the Spanner Graph schema is compiled and deployed, and your instance supports Graph features.")
+                    st.error(f"GCP Spanner Graph relational query failed: {ge}")
                     # Fallback to simulated mapping to keep the presentation running
                     graph_db = SpannerGraphSimulator()
                     graph_expansion = graph_db.execute_graph_expansion("NR-001")
@@ -433,7 +528,34 @@ with tab3:
             
         st.markdown("**Synthesized Answer:**")
         
-        if gemini_key:
+        if is_live:
+            with st.spinner("Synthesizing answer using Google Vertex AI (Gemini 1.5)..."):
+                try:
+                    vertexai.init(project=spanner_project, location="us-central1")
+                    model = GenerativeModel("gemini-1.5-flash")
+                    prompt = (
+                        f"You are a helpful logistics and infrastructure database assistant. Answer the user query using ONLY the provided contexts.\n\n"
+                        f"Context details:\n{context_payload}\n\n"
+                        f"User Query: {active_query}\n\n"
+                        f"Answer:"
+                    )
+                    response = model.generate_content(prompt)
+                    st.success(response.text)
+                except Exception as vertex_err:
+                    st.error(f"Vertex AI Gemini invocation failed: {vertex_err}")
+                    st.warning("Falling back to pre-compiled context generator.")
+                    answer_text = (
+                        f"Based on the combined evidence:\n\n"
+                        f"1. Unstructured logs reveal that the origin station **OAK-STN** is experiencing severe gate congestion "
+                        f"due to local power fluctuations, which may cause dispatch delays for segments originating from OAK.\n"
+                        f"2. Spanner Graph paths reveal that the route **{graph_expansion['start_node']['id']}** "
+                        f"has a service commitment of **{graph_expansion['start_node']['details']['service_commit']}**.\n"
+                        f"3. Segment **{graph_expansion['connections'][1]['target_segment_id']}** connects OAK-RAMP to MEM-HUB "
+                        f"via **{graph_expansion['connections'][1]['transport_mode']}** transport with weight **{graph_expansion['connections'][1]['weight']} kg**.\n\n"
+                        f"*Conclusion*: Although dispatch delays might affect segments originating from OAK due to power fluctuations, the downstream connection to MEM-HUB via AIR remains active."
+                    )
+                    st.success(answer_text)
+        elif gemini_key:
             with st.spinner("Synthesizing answer using Google Gemini..."):
                 try:
                     import google.generativeai as genai
@@ -465,7 +587,7 @@ with tab3:
                     )
                     st.success(answer_text)
         else:
-            st.info("💡 Pro-Tip: Provide your Gemini API Key in the sidebar to generate live synthesized answers.")
+            st.info("💡 Pro-Tip: Provide your Gemini API Key in the sidebar or run in Live Mode to generate live synthesized answers.")
             # Fallback to local static answer template
             answer_text = (
                 f"Based on the combined evidence:\n\n"
