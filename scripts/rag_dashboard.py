@@ -305,8 +305,8 @@ with tab1:
                                 st.error("❌ Compilation Blocked: Breaking change detected.")
                                 st.json(compilation_plan["migration_recipe"])
                             else:
-                                # Apply compiled DDLs
-                                ddl_statements = compilation_plan["actions"]
+                                # Apply compiled DDLs (strip trailing semicolons required by Spanner update_ddl API)
+                                ddl_statements = [stmt.rstrip(";") for stmt in compilation_plan["actions"] if stmt.strip()]
                                 if ddl_statements:
                                     st.info(f"Deploying {len(ddl_statements)} DDL statements to Spanner...")
                                     operation = registry_manager.spanner_db.update_ddl(ddl_statements)
