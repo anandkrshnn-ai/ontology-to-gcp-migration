@@ -170,9 +170,9 @@ class GraphCompiler:
             edges_list.append(
                 f"    {view_name} AS edge_{label.lower()}\n"
                 f"      KEY ({source_fk}, {target_fk})\n"
-                f"      SOURCE KEY ({source_fk}) REFERENCES v_{source_node} ({source_key})\n"
-                f"      DESTINATION KEY ({target_fk}) REFERENCES v_{target_node} ({target_key})\n"
-                f"      AS {label}"
+                f"      SOURCE KEY ({source_fk}) REFERENCES v_{source_node}\n"
+                f"      DESTINATION KEY ({target_fk}) REFERENCES v_{target_node}\n"
+                f"      LABEL {label}"
             )
             
         nodes_ddl = ",\n".join(nodes_list)
