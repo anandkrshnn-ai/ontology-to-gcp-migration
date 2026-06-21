@@ -310,6 +310,11 @@ with tab1:
                             else:
                                 # Apply compiled DDLs (strip trailing semicolons required by Spanner update_ddl API)
                                 ddl_statements = [stmt.rstrip(";") for stmt in compilation_plan["actions"] if stmt.strip()]
+                                # Prepend DROP PROPERTY GRAPH to break the dependency lock on views
+                                if graph_yaml:
+                                    graph_name = graph_yaml.get("spec", {}).get("graphName", "air_routing_graph")
+                                    ddl_statements.insert(0, f"DROP PROPERTY GRAPH IF EXISTS {graph_name}")
+                                
                                 if ddl_statements:
                                     st.info(f"Deploying {len(ddl_statements)} DDL statements to Spanner...")
                                     operation = registry_manager.spanner_db.update_ddl(ddl_statements)
