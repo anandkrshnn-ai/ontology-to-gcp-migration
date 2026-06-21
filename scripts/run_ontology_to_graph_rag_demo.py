@@ -14,18 +14,18 @@ class MockVectorStore:
         self.documents = [
             {
                 "id": "doc_chunk_1",
-                "text": "Incident Report: Chicago Hub (node_id: network_routing) is experiencing severe gate congestion today due to local power fluctuations. Operational capacity is temporarily reduced by 40%.",
-                "entities": {"node_id": "network_routing"}
+                "text": "Incident Report: OAK-STN origin station is experiencing severe gate congestion today due to local power fluctuations. Segments originating from OAK may suffer dispatch delays.",
+                "entities": {"routing_id": "NR-001"}
             },
             {
                 "id": "doc_chunk_2",
-                "text": "Maintenance Log: The transit path between Chicago Hub and New York Segment (segment_id: network_routing_segment) is running smoothly. Average duration remains constant.",
-                "entities": {"segment_id": "network_routing_segment"}
+                "text": "Maintenance Log: The air corridor segment SEG-002 from OAK-RAMP to MEM-HUB is running smoothly. Average duration remains constant.",
+                "entities": {"segment_id": "SEG-002"}
             },
             {
                 "id": "doc_chunk_3",
                 "text": "Telemetry alert: High wind warnings are currently active along the transit corridor between Chicago and Dallas segments.",
-                "entities": {"segment_id": "network_routing_segment"}
+                "entities": {"segment_id": "SEG-002"}
             }
         ]
         # Generate simple mock embeddings for each document
@@ -59,42 +59,45 @@ class SpannerGraphSimulator:
         # Seeded relational database records matching ontology yaml definitions
         self.nodes = {
             "network_routing": {
-                "CHI-NODE-01": {"name": "Chicago Logistics Hub", "location_type": "Air Hub", "latitude": 41.8781, "longitude": -87.6298, "capacity": 1200},
-                "NYC-NODE-02": {"name": "New York Distribution Center", "location_type": "Land Hub", "latitude": 40.7128, "longitude": -74.0060, "capacity": 2500}
+                "NR-001": {"origin_operation_id": "OAK-STN", "destination_operation_id": "DAL-STN", "service_commit": "2-DAY", "zulu_day": "2026-06-18"},
+                "NR-002": {"origin_operation_id": "OAK-STN", "destination_operation_id": "ORD-STN", "service_commit": "2-DAY", "zulu_day": "2026-06-18"}
             },
             "network_routing_segment": {
-                "SEG-CHI-NYC-01": {"origin_node_id": "CHI-NODE-01", "destination_node_id": "NYC-NODE-02", "distance_km": 1150.0, "status": "ACTIVE"}
+                "SEG-001": {"routing_id": "NR-001", "origin_operation_id": "OAK-STN", "destination_operation_id": "OAK-RAMP", "transport_mode": "SURFACE", "weight": 1450, "pieces": 62, "zulu_day": "2026-06-18"},
+                "SEG-002": {"routing_id": "NR-001", "origin_operation_id": "OAK-RAMP", "destination_operation_id": "MEM-HUB", "transport_mode": "AIR", "weight": 1450, "pieces": 62, "zulu_day": "2026-06-18"}
             },
             "operation": {
-                "OP-CHI-01": {"node_id": "CHI-NODE-01", "operation_type": "De-palletization", "operating_hours": "06:00-22:00", "active": True}
+                "OAK-STN": {"operation_type": "STATION", "location_code": "OAK"},
+                "MEM-HUB": {"operation_type": "HUB", "location_code": "MEM"}
             }
         }
         self.edges = {
-            "transit_path": {
-                "PATH-01": {"source": "CHI-NODE-01", "target": "SEG-CHI-NYC-01", "transit_mode": "Freight Train", "avg_duration_hours": 14.5}
+            "has_segments": {
+                "EDGE-001": {"source": "NR-001", "target": "SEG-001", "relationship": "HAS_SEGMENT"},
+                "EDGE-002": {"source": "NR-001", "target": "SEG-002", "relationship": "HAS_SEGMENT"}
             }
         }
 
     def execute_graph_expansion(self, start_node_id: str) -> Dict[str, Any]:
         """
         Simulates executing a Spanner Graph query.
-        GRAPH LogisticsRoutingGraph
-        MATCH (n:NetworkRouting {node_id: 'CHI-NODE-01'})-[e:TRANSIT_PATH]->(s:RoutingSegment)
-        RETURN n.name, s.segment_id, e.transit_mode
+        GRAPH air_routing_graph
+        MATCH (r:NetworkRouting {routing_id: 'NR-001'})-[e:HAS_SEGMENT]->(s:NetworkRoutingSegment)
+        RETURN r.routing_id, r.service_commit, s.segment_id, s.transport_mode, s.weight
         """
         node_details = self.nodes["network_routing"].get(start_node_id)
         if not node_details:
             return {}
 
         connected_edges = []
-        for edge_id, edge_data in self.edges["transit_path"].items():
+        for edge_id, edge_data in self.edges["has_segments"].items():
             if edge_data["source"] == start_node_id:
                 target_id = edge_data["target"]
                 segment_details = self.nodes["network_routing_segment"].get(target_id)
                 connected_edges.append({
                     "edge_id": edge_id,
-                    "transit_mode": edge_data["transit_mode"],
-                    "avg_duration_hours": edge_data["avg_duration_hours"],
+                    "transport_mode": segment_details["transport_mode"],
+                    "weight": segment_details["weight"],
                     "target_segment_id": target_id,
                     "segment_details": segment_details
                 })
@@ -150,7 +153,7 @@ def run_full_rag_demo():
 
     # --- Step 4: Serving Plane: GraphRAG Query Execution ---
     print("\n[STEP 4] GraphRAG Execution: Retrieval Augmented Graph Expansion")
-    query = "Why is operational capacity degraded at the Chicago Hub, and what is the transit mode to its segments?"
+    query = "Why are segments originating from OAK experiencing delays, and what transport mode satisfies SEG-002?"
     print(f"User Query: \"{query}\"")
     
     # 4a. Semantic Search over chunks
@@ -163,8 +166,7 @@ def run_full_rag_demo():
 
     # 4b. Graph Context Expansion via Spanner Graph
     print("\n  Sub-Step 4b: Resolving Node entity and traversing Spanner Graph...")
-    # Map semantically resolved context to Chicago Hub node: CHI-NODE-01
-    start_node = "CHI-NODE-01"
+    start_node = "NR-001"
     graph_db = SpannerGraphSimulator()
     graph_expansion = graph_db.execute_graph_expansion(start_node)
     
@@ -179,8 +181,8 @@ def run_full_rag_demo():
         f"--- UNSTRUCTURED DOCUMENT EVIDENCE ---\n"
         f"{matched_doc['text']}\n\n"
         f"--- STRUCTURED GRAPH RETRIEVED RELATIONSHIPS ---\n"
-        f"Hub Node: {graph_expansion['start_node']['details']['name']} (Capacity: {graph_expansion['start_node']['details']['capacity']})\n"
-        f"Segment Link: {graph_expansion['connections'][0]['target_segment_id']} (Transit Mode: {graph_expansion['connections'][0]['transit_mode']}, Average Duration: {graph_expansion['connections'][0]['avg_duration_hours']} hours, Status: {graph_expansion['connections'][0]['segment_details']['status']})\n"
+        f"Route: {graph_expansion['start_node']['id']} (Commitment: {graph_expansion['start_node']['details']['service_commit']})\n"
+        f"Segment Link: {graph_expansion['connections'][1]['target_segment_id']} (Transport Mode: {graph_expansion['connections'][1]['transport_mode']}, Weight: {graph_expansion['connections'][1]['weight']} kg, Status: ACTIVE)\n"
     )
 
     print("Evidence payload assembled for LLM Context:")
@@ -193,12 +195,13 @@ def run_full_rag_demo():
     print("--------------------------------------------------------------------------------")
     print(
         f"Based on the combined evidence:\n"
-        f"1. Unstructured logs reveal that the {graph_expansion['start_node']['details']['name']} (CHI-NODE-01) "
-        f"is experiencing power fluctuations causing a 40% operational capacity reduction (temporary capacity reduced to 720 units).\n"
-        f"2. Spanner Graph paths reveal that this hub connects to segment {graph_expansion['connections'][0]['target_segment_id']} "
-        f"via {graph_expansion['connections'][0]['transit_mode']} with an average duration of {graph_expansion['connections'][0]['avg_duration_hours']} hours.\n"
-        f"3. The connection is currently {graph_expansion['connections'][0]['segment_details']['status']}.\n"
-        f"Conclusion: Logistics delays should be expected at Chicago Hub, but downstream transit connections remain healthy."
+        f"1. Unstructured logs reveal that the origin station OAK-STN is experiencing severe gate congestion "
+        f"due to local power fluctuations, which may cause dispatch delays for segments originating from OAK.\n"
+        f"2. Spanner Graph paths reveal that the route {graph_expansion['start_node']['id']} "
+        f"has a service commitment of {graph_expansion['start_node']['details']['service_commit']}.\n"
+        f"3. Segment {graph_expansion['connections'][1]['target_segment_id']} connects OAK-RAMP to MEM-HUB "
+        f"via {graph_expansion['connections'][1]['transport_mode']} transport with weight {graph_expansion['connections'][1]['weight']} kg.\n"
+        f"Conclusion: Although dispatch delays might affect segments originating from OAK due to power fluctuations, the downstream connection to MEM-HUB via AIR remains active."
     )
     print("--------------------------------------------------------------------------------")
 

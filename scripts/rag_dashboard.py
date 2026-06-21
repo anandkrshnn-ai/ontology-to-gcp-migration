@@ -331,15 +331,15 @@ with tab3:
             if not is_live:
                 # Simulated query expansion
                 graph_db = SpannerGraphSimulator()
-                graph_expansion = graph_db.execute_graph_expansion("CHI-NODE-01")
+                graph_expansion = graph_db.execute_graph_expansion("NR-001")
             else:
                 # Real Spanner Graph query execution
                 try:
                     with registry_manager.spanner_db.snapshot() as snapshot:
                         gql_query = (
-                            "GRAPH LogisticsRoutingGraph "
-                            "MATCH (n:NetworkRouting {node_id: 'CHI-NODE-01'})-[e:TRANSIT_PATH]->(s:RoutingSegment) "
-                            "RETURN n.name AS name, n.capacity AS capacity, s.segment_id AS target_segment_id, e.transit_mode AS transit_mode, e.avg_duration_hours AS avg_duration"
+                            "GRAPH air_routing_graph "
+                            "MATCH (r:NetworkRouting {routing_id: 'NR-001'})-[e:HAS_SEGMENT]->(s:NetworkRoutingSegment) "
+                            "RETURN r.routing_id AS routing_id, r.service_commit AS service_commit, s.segment_id AS target_segment_id, s.transport_mode AS transport_mode, s.weight AS weight"
                         )
                         results = snapshot.execute_sql(gql_query)
                         rows = list(results)
@@ -348,13 +348,13 @@ with tab3:
                             # Build response mapping matching Spanner Graph query schema
                             graph_expansion = {
                                 "start_node": {
-                                    "id": "CHI-NODE-01",
-                                    "details": {"name": rows[0][0], "capacity": rows[0][1]}
+                                    "id": "NR-001",
+                                    "details": {"routing_id": rows[0][0], "service_commit": rows[0][1]}
                                 },
                                 "connections": [{
                                     "target_segment_id": row[2],
-                                    "transit_mode": row[3],
-                                    "avg_duration_hours": row[4],
+                                    "transport_mode": row[3],
+                                    "weight": row[4],
                                     "segment_details": {"status": "ACTIVE"}
                                 } for row in rows]
                             }
@@ -364,17 +364,23 @@ with tab3:
                             # Auto-seed basic data to make the live demo work instantly
                             def _seed_spanner(transaction):
                                 transaction.execute_update(
-                                    "INSERT OR UPDATE INTO network_routing (node_id, name, capacity) VALUES "
-                                    "('CHI-NODE-01', 'Chicago Logistics Hub', 1200), "
-                                    "('NYC-NODE-02', 'New York Distribution Center', 2500)"
+                                    "INSERT OR UPDATE INTO operation (operation_id, operation_type, location_code) VALUES "
+                                    "('OAK-STN', 'STATION', 'OAK'), "
+                                    "('MEM-HUB', 'HUB', 'MEM'), "
+                                    "('DAL-STN', 'STATION', 'DAL')"
                                 )
                                 transaction.execute_update(
-                                    "INSERT OR UPDATE INTO network_routing_segment (segment_id, origin_node_id, destination_node_id, status) VALUES "
-                                    "('SEG-CHI-NYC-01', 'CHI-NODE-01', 'NYC-NODE-02', 'ACTIVE')"
+                                    "INSERT OR UPDATE INTO network_routing (routing_id, origin_operation_id, destination_operation_id, service_commit, zulu_day) VALUES "
+                                    "('NR-001', 'OAK-STN', 'DAL-STN', '2-DAY', '2026-06-18')"
                                 )
                                 transaction.execute_update(
-                                    "INSERT OR UPDATE INTO transit_path (path_id, source_id, target_id, transit_mode, avg_duration_hours) VALUES "
-                                    "('PATH-01', 'CHI-NODE-01', 'SEG-CHI-NYC-01', 'Freight Train', 14.5)"
+                                    "INSERT OR UPDATE INTO network_routing_segment (segment_id, routing_id, origin_operation_id, destination_operation_id, transport_mode, weight, pieces, zulu_day) VALUES "
+                                    "('SEG-001', 'NR-001', 'OAK-STN', 'OAK-RAMP', 'SURFACE', 1450, 62, '2026-06-18'), "
+                                    "('SEG-002', 'NR-001', 'OAK-RAMP', 'MEM-HUB', 'AIR', 1450, 62, '2026-06-18')"
+                                )
+                                transaction.execute_update(
+                                    "INSERT OR UPDATE INTO transit_path (transit_path_id, segment_id, total_transit_minutes) VALUES "
+                                    "('TP-001', 'SEG-002', 215)"
                                 )
                             
                             registry_manager.spanner_db.run_in_transaction(_seed_spanner)
@@ -385,13 +391,13 @@ with tab3:
                             rows = list(results)
                             graph_expansion = {
                                 "start_node": {
-                                    "id": "CHI-NODE-01",
-                                    "details": {"name": rows[0][0], "capacity": rows[0][1]}
+                                    "id": "NR-001",
+                                    "details": {"routing_id": rows[0][0], "service_commit": rows[0][1]}
                                 },
                                 "connections": [{
                                     "target_segment_id": row[2],
-                                    "transit_mode": row[3],
-                                    "avg_duration_hours": row[4],
+                                    "transport_mode": row[3],
+                                    "weight": row[4],
                                     "segment_details": {"status": "ACTIVE"}
                                 } for row in rows]
                             }
@@ -400,14 +406,14 @@ with tab3:
                     st.info("Ensure the Spanner Graph schema is compiled and deployed, and your instance supports Graph features.")
                     # Fallback to simulated mapping to keep the presentation running
                     graph_db = SpannerGraphSimulator()
-                    graph_expansion = graph_db.execute_graph_expansion("CHI-NODE-01")
+                    graph_expansion = graph_db.execute_graph_expansion("NR-001")
             
             col_gr1, col_gr2 = st.columns(2)
             with col_gr1:
                 st.markdown("**Starting Graph Node (NetworkRouting)**")
                 st.write(graph_expansion["start_node"]["details"])
             with col_gr2:
-                st.markdown("**Traversed Edge Links (TRANSIT_PATH -> RoutingSegment)**")
+                st.markdown("**Traversed Edge Links (HAS_SEGMENT -> NetworkRoutingSegment)**")
                 st.write(graph_expansion["connections"])
                 
         # 3. Context Integration & Generation
@@ -418,8 +424,8 @@ with tab3:
             f"--- SYSTEM MIGRATION CONTEXT EVIDENCE ---\n"
             f"Unstructured Log Evidence:\n{matched['text']}\n\n"
             f"Structured Spanner Graph Traversal:\n"
-            f"- Starting Hub Node: {graph_expansion['start_node']['details']['name']} (ID: {graph_expansion['start_node']['id']}, Capacity: {graph_expansion['start_node']['details']['capacity']})\n"
-            f"- Connected Segment: {graph_expansion['connections'][0]['target_segment_id']} (Transit Mode: {graph_expansion['connections'][0]['transit_mode']}, Average Duration: {graph_expansion['connections'][0]['avg_duration_hours']} hours, Status: {graph_expansion['connections'][0]['segment_details']['status']})\n"
+            f"- Starting Route Node: {graph_expansion['start_node']['id']} (Commitment: {graph_expansion['start_node']['details']['service_commit']})\n"
+            f"- Connected Segment: {graph_expansion['connections'][1]['target_segment_id']} (Transport Mode: {graph_expansion['connections'][1]['transport_mode']}, Weight: {graph_expansion['connections'][1]['weight']} kg, Status: ACTIVE)\n"
         )
         
         with st.expander("Show Assembled Context Window Payload"):
@@ -449,12 +455,13 @@ with tab3:
                     # Fallback to local static answer template
                     answer_text = (
                         f"Based on the combined evidence:\n\n"
-                        f"1. Unstructured logs reveal that the **{graph_expansion['start_node']['details']['name']}** (CHI-NODE-01) "
-                        f"is experiencing power fluctuations causing a 40% operational capacity reduction (temporary capacity reduced to 720 units).\n"
-                        f"2. Spanner Graph paths reveal that this hub connects to segment **{graph_expansion['connections'][0]['target_segment_id']}** "
-                        f"via **{graph_expansion['connections'][0]['transit_mode']}** with an average duration of **{graph_expansion['connections'][0]['avg_duration_hours']} hours**.\n"
-                        f"3. The connection is currently **{graph_expansion['connections'][0]['segment_details']['status']}**.\n\n"
-                        f"*Conclusion*: Logistics delays should be expected at Chicago Hub, but downstream transit connections remain healthy."
+                        f"1. Unstructured logs reveal that the origin station **OAK-STN** is experiencing severe gate congestion "
+                        f"due to local power fluctuations, which may cause dispatch delays for segments originating from OAK.\n"
+                        f"2. Spanner Graph paths reveal that the route **{graph_expansion['start_node']['id']}** "
+                        f"has a service commitment of **{graph_expansion['start_node']['details']['service_commit']}**.\n"
+                        f"3. Segment **{graph_expansion['connections'][1]['target_segment_id']}** connects OAK-RAMP to MEM-HUB "
+                        f"via **{graph_expansion['connections'][1]['transport_mode']}** transport with weight **{graph_expansion['connections'][1]['weight']} kg**.\n\n"
+                        f"*Conclusion*: Although dispatch delays might affect segments originating from OAK due to power fluctuations, the downstream connection to MEM-HUB via AIR remains active."
                     )
                     st.success(answer_text)
         else:
@@ -462,12 +469,13 @@ with tab3:
             # Fallback to local static answer template
             answer_text = (
                 f"Based on the combined evidence:\n\n"
-                f"1. Unstructured logs reveal that the **{graph_expansion['start_node']['details']['name']}** (CHI-NODE-01) "
-                f"is experiencing power fluctuations causing a 40% operational capacity reduction (temporary capacity reduced to 720 units).\n"
-                f"2. Spanner Graph paths reveal that this hub connects to segment **{graph_expansion['connections'][0]['target_segment_id']}** "
-                f"via **{graph_expansion['connections'][0]['transit_mode']}** with an average duration of **{graph_expansion['connections'][0]['avg_duration_hours']} hours**.\n"
-                f"3. The connection is currently **{graph_expansion['connections'][0]['segment_details']['status']}**.\n\n"
-                f"*Conclusion*: Logistics delays should be expected at Chicago Hub, but downstream transit connections remain healthy."
+                f"1. Unstructured logs reveal that the origin station **OAK-STN** is experiencing severe gate congestion "
+                f"due to local power fluctuations, which may cause dispatch delays for segments originating from OAK.\n"
+                f"2. Spanner Graph paths reveal that the route **{graph_expansion['start_node']['id']}** "
+                f"has a service commitment of **{graph_expansion['start_node']['details']['service_commit']}**.\n"
+                f"3. Segment **{graph_expansion['connections'][1]['target_segment_id']}** connects OAK-RAMP to MEM-HUB "
+                f"via **{graph_expansion['connections'][1]['transport_mode']}** transport with weight **{graph_expansion['connections'][1]['weight']} kg**.\n\n"
+                f"*Conclusion*: Although dispatch delays might affect segments originating from OAK due to power fluctuations, the downstream connection to MEM-HUB via AIR remains active."
             )
             st.success(answer_text)
     st.markdown("</div>", unsafe_allow_html=True)
