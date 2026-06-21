@@ -54,3 +54,6 @@ steps:
       - |
         cd terraform/envs/dev
         terraform plan -var-file="terraform.tfvars" -input=false
+
+options:
+  logging: CLOUD_LOGGING_ONLY
