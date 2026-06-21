@@ -146,10 +146,11 @@ class GraphCompiler:
         for node in spec.get("nodes", []):
             obj_type = node["objectType"]
             table_name = node["tableName"]
+            key = node["key"]
             label = node["label"]
             # Graph binds directly to the view surface v_<table>
             view_name = f"v_{table_name}"
-            nodes_list.append(f"    {view_name}\n      LABEL {label}")
+            nodes_list.append(f"    {view_name} KEY ({key})\n      LABEL {label}")
             
         edges_list = []
         for edge in spec.get("edges", []):
