@@ -169,7 +169,7 @@ spanner_database = ""
 if conn_mode == "Live Google Cloud Spanner":
     st.sidebar.markdown("---")
     st.sidebar.subheader("Spanner Configuration")
-    spanner_project = st.sidebar.text_input("GCP Project ID:", value=os.environ.get("GOOGLE_CLOUD_PROJECT", "migration-demo"))
+    spanner_project = st.sidebar.text_input("GCP Project ID:", value=os.environ.get("GOOGLE_CLOUD_PROJECT", "migiration-demo"))
     spanner_instance = st.sidebar.text_input("Spanner Instance ID:", value="ontology-demo")
     spanner_database = st.sidebar.text_input("Spanner Database ID:", value="ontology-db")
     
