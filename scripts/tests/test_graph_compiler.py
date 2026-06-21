@@ -48,7 +48,8 @@ class TestGraphCompiler(unittest.TestCase):
 
         view_ddl = compiler.generate_view_ddl(self.node_yaml)
         self.assertIn("CREATE OR REPLACE VIEW v_routing_node", view_ddl)
-        self.assertIn("SELECT node_id, capacity", view_ddl)
+        self.assertIn("SELECT t.node_id, t.capacity", view_ddl)
+        self.assertIn("FROM routing_node AS t", view_ddl)
 
     def test_property_graph_ddl_uses_views(self):
         compiler = GraphCompiler(compatibility_status="ADDITIVE", schema_diffs={})
