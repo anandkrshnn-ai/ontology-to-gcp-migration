@@ -298,7 +298,11 @@ with tab1:
                             yamls_list = [data for _, data in validated_files]
                             graph_yaml = next((y for y in yamls_list if y.get("kind") == "PropertyGraph"), None)
                             
-                            compiler = GraphCompiler(compatibility_status=plan_info["status"], schema_diffs=plan_info["schema_diffs"])
+                            compiler = GraphCompiler(
+                                compatibility_status=plan_info["status"], 
+                                schema_diffs=plan_info["schema_diffs"],
+                                skip_graph_ddl=is_live
+                            )
                             compilation_plan = compiler.compile_plan(yamls_list, graph_yaml)
                             
                             if compilation_plan["status"] == "BLOCKED_BREAKING":

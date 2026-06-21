@@ -26,9 +26,10 @@ class GraphCompiler:
     (CREATE OR REPLACE PROPERTY GRAPH).
     """
 
-    def __init__(self, compatibility_status: str, schema_diffs: Dict[str, Any]):
+    def __init__(self, compatibility_status: str, schema_diffs: Dict[str, Any], skip_graph_ddl: bool = False):
         self.compatibility_status = compatibility_status  # ADDITIVE, COMPATIBLE, BREAKING
         self.schema_diffs = schema_diffs
+        self.skip_graph_ddl = skip_graph_ddl
 
     def _normalise_spec(self, entity_yaml: Dict[str, Any]) -> Dict[str, Any]:
         """Normalises both old (properties dict) and new (attributes list) YAML formats."""
@@ -146,11 +147,10 @@ class GraphCompiler:
         for node in spec.get("nodes", []):
             obj_type = node["objectType"]
             table_name = node["tableName"]
-            key = node["key"]
             label = node["label"]
             # Graph binds directly to the view surface v_<table>
             view_name = f"v_{table_name}"
-            nodes_list.append(f"    {view_name} KEY ({key}) AS {label}")
+            nodes_list.append(f"    {view_name}\n      LABEL {label}")
             
         edges_list = []
         for edge in spec.get("edges", []):
@@ -169,11 +169,9 @@ class GraphCompiler:
             
             # Edge connects nodes through view keys and foreign keys with unique alias
             edges_list.append(
-                f"    {view_name} AS edge_{label.lower()}\n"
-                f"      KEY ({target_fk})\n"
+                f"    {view_name} AS {label}\n"
                 f"      SOURCE KEY ({source_fk}) REFERENCES v_{source_node} ({source_key})\n"
-                f"      DESTINATION KEY ({target_fk}) REFERENCES v_{target_node} ({target_key})\n"
-                f"      LABEL {label}"
+                f"      DESTINATION KEY ({target_fk}) REFERENCES v_{target_node} ({target_key})"
             )
             
         nodes_ddl = ",\n".join(nodes_list)
@@ -237,8 +235,8 @@ class GraphCompiler:
                 if view_ddl:
                     actions.append(view_ddl)
                     
-        # 3. Generate Property Graph DDL
-        if graph_yaml:
+        # 3. Generate Property Graph DDL (skip if skip_graph_ddl is enabled for Spanner Standard compatibility)
+        if graph_yaml and not self.skip_graph_ddl:
             graph_ddl = self.generate_property_graph_ddl(graph_yaml)
             actions.append(graph_ddl)
             
