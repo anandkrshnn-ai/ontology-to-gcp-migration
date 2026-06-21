@@ -27,26 +27,31 @@ spec:
   edges:
     - label: HAS_SEGMENT
       tableName: network_routing_segment
+      key: segment_id
       relationshipType: HAS_SEGMENT
       source: { nodeType: network_routing, key: routing_id, foreignKey: routing_id }
       target: { nodeType: network_routing_segment, key: segment_id, foreignKey: segment_id }
     - label: BELONGS_TO
       tableName: network_routing_segment
+      key: segment_id
       relationshipType: BELONGS_TO
       source: { nodeType: network_routing_segment, key: segment_id, foreignKey: segment_id }
       target: { nodeType: network_routing, key: routing_id, foreignKey: routing_id }
     - label: ORIGINATES_AT
       tableName: network_routing_segment
+      key: segment_id
       relationshipType: ORIGINATES_AT
       source: { nodeType: network_routing_segment, key: segment_id, foreignKey: segment_id }
       target: { nodeType: operation, key: operation_id, foreignKey: origin_operation_id }
     - label: TERMINATES_AT
       tableName: network_routing_segment
+      key: segment_id
       relationshipType: TERMINATES_AT
       source: { nodeType: network_routing_segment, key: segment_id, foreignKey: segment_id }
       target: { nodeType: operation, key: operation_id, foreignKey: destination_operation_id }
     - label: SATISFIES
       tableName: transit_path
+      key: transit_path_id
       relationshipType: SATISFIES
       source: { nodeType: transit_path, key: transit_path_id, foreignKey: transit_path_id }
       target: { nodeType: network_routing_segment, key: segment_id, foreignKey: segment_id }
