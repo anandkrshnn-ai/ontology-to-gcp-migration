@@ -4,6 +4,8 @@ import os
 import sys
 import yaml
 import numpy as np
+from pyvis.network import Network
+import streamlit.components.v1 as components
 
 # Adjust sys.path to resolve local packages in the workspace root
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -225,7 +227,12 @@ if "last_conn_mode" not in st.session_state or st.session_state.last_conn_mode !
         del st.session_state.vector_store
 
 # Tabs
-tab1, tab2, tab3 = st.tabs(["🎛️ Control Plane (Compiler)", "📥 Ingestion Zone (Telemetry)", "🔍 Serving Plane (GraphRAG)"])
+tab1, tab2, tab3, tab4 = st.tabs([
+    "🎛️ Control Plane (Compiler)", 
+    "📥 Ingestion Zone (Telemetry)", 
+    "🔍 Serving Plane (GraphRAG)",
+    "🌐 Graph Explorer"
+])
 
 # TAB 1: Control Plane
 with tab1:
@@ -623,4 +630,60 @@ with tab3:
                 f"*Conclusion*: Although dispatch delays might affect segments originating from OAK due to power fluctuations, the downstream connection to MEM-HUB via AIR remains active."
             )
             st.success(answer_text)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# TAB 4: Graph Explorer
+with tab4:
+    st.markdown("### Interactive Network Graph Visualization")
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("Ontology Routing Dependencies")
+    
+    with st.spinner("Rendering Graph..."):
+        # Build network graph
+        net = Network(height="600px", width="100%", directed=True, bgcolor="#0d0f14", font_color="#e0e0e0")
+        
+        # We will use the seeded data representing the central hub MEM-HUB and surrounding segments
+        # Add Nodes
+        net.add_node("OAK-STN", label="OAK-STN", color="#4ECDC4", shape="dot", size=20)
+        net.add_node("OAK-RAMP", label="OAK-RAMP", color="#4ECDC4", shape="dot", size=20)
+        net.add_node("MEM-HUB", label="MEM-HUB", color="#FF6B6B", shape="star", size=35, title="Central Routing Hub")
+        net.add_node("DAL-RAMP", label="DAL-RAMP", color="#FFE66D", shape="dot", size=20)
+        net.add_node("DAL-STN", label="DAL-STN", color="#FFE66D", shape="dot", size=20)
+        net.add_node("ORD-RAMP", label="ORD-RAMP", color="#45B7D1", shape="dot", size=20)
+        net.add_node("ORD-STN", label="ORD-STN", color="#45B7D1", shape="dot", size=20)
+        
+        # Add Edges
+        net.add_edge("OAK-STN", "OAK-RAMP", label="SEG-001 (SURFACE)", color="#8a99ad")
+        net.add_edge("OAK-RAMP", "MEM-HUB", label="SEG-002 (AIR)", color="#1a73e8", width=3)
+        net.add_edge("MEM-HUB", "DAL-RAMP", label="SEG-003 (AIR)", color="#1a73e8", width=3)
+        net.add_edge("DAL-RAMP", "DAL-STN", label="SEG-004 (SURFACE)", color="#8a99ad")
+        net.add_edge("ORD-STN", "ORD-RAMP", label="SEG-011 (SURFACE)", color="#8a99ad")
+        net.add_edge("ORD-RAMP", "MEM-HUB", label="SEG-012 (AIR)", color="#1a73e8", width=3)
+        
+        # Configure physics for better layout
+        net.set_options("""
+        var options = {
+          "physics": {
+            "hierarchicalRepulsion": {
+              "centralGravity": 0.0,
+              "springLength": 150,
+              "nodeDistance": 150
+            },
+            "minVelocity": 0.75,
+            "solver": "hierarchicalRepulsion"
+          }
+        }
+        """)
+        
+        # Save and render
+        html_path = "artifacts/graph.html"
+        os.makedirs("artifacts", exist_ok=True)
+        net.save_graph(html_path)
+        
+        with open(html_path, "r", encoding="utf-8") as f:
+            html_content = f.read()
+            
+        components.html(html_content, height=620)
+        
+    st.info("💡 **Impact Analysis:** The graph above highlights how multiple routings depend on the `MEM-HUB` central node. This is a visual representation of the property graph queries that power the GraphRAG serving plane.")
     st.markdown("</div>", unsafe_allow_html=True)
