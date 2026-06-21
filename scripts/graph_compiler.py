@@ -112,7 +112,7 @@ class GraphCompiler:
             required = " NOT NULL" if prop_def.get("required", False) else ""
             columns.append(f"    {prop_name} {spanner_type}{required}")
 
-        ddl = f"CREATE TABLE {table_name} (\n" + ",\n".join(columns) + f"\n) PRIMARY KEY ({primary_key});"
+        ddl = f"CREATE TABLE IF NOT EXISTS {table_name} (\n" + ",\n".join(columns) + f"\n) PRIMARY KEY ({primary_key});"
         return ddl
 
     def generate_view_ddl(self, entity_yaml: Dict[str, Any]) -> str:
