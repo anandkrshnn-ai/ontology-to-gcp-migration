@@ -486,25 +486,33 @@ with tab3:
                             registry_manager.spanner_db.run_in_transaction(_seed_spanner)
                             st.info("Successfully seeded demo data in Spanner! Re-running query...")
                             
-                            # Retry query
-                            results = snapshot.execute_sql(
-                                sql_query,
-                                params={"routing_id": "NR-001"},
-                                param_types={"routing_id": spanner.param_types.STRING}
-                            )
-                            rows = list(results)
-                            graph_expansion = {
-                                "start_node": {
-                                    "id": "NR-001",
-                                    "details": {"routing_id": rows[0][0], "service_commit": rows[0][1]}
-                                },
-                                "connections": [{
-                                    "target_segment_id": row[2],
-                                    "transport_mode": row[3],
-                                    "weight": row[4],
-                                    "segment_details": {"status": "ACTIVE"}
-                                } for row in rows]
-                            }
+                            # Retry with a FRESH snapshot — single-use snapshots cannot be re-used
+                            with registry_manager.spanner_db.snapshot() as retry_snapshot:
+                                retry_results = retry_snapshot.execute_sql(
+                                    sql_query,
+                                    params={"routing_id": "NR-001"},
+                                    param_types={"routing_id": spanner.param_types.STRING}
+                                )
+                                rows = list(retry_results)
+                            
+                            if rows:
+                                graph_expansion = {
+                                    "start_node": {
+                                        "id": "NR-001",
+                                        "details": {"routing_id": rows[0][0], "service_commit": rows[0][1]}
+                                    },
+                                    "connections": [{
+                                        "target_segment_id": row[2],
+                                        "transport_mode": row[3],
+                                        "weight": row[4],
+                                        "segment_details": {"status": "ACTIVE"}
+                                    } for row in rows]
+                                }
+                            else:
+                                # Seeding succeeded but views may not be ready yet — use simulator
+                                st.warning("Seed complete but views returned no rows yet. Using simulated graph context.")
+                                graph_db = SpannerGraphSimulator()
+                                graph_expansion = graph_db.execute_graph_expansion("NR-001")
                 except Exception as ge:
                     st.error(f"GCP Spanner Graph relational query failed: {ge}")
                     # Fallback to simulated mapping to keep the presentation running
