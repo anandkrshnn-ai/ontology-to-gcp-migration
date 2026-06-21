@@ -166,9 +166,9 @@ class GraphCompiler:
             target_key = edge["target"]["key"]
             target_fk = edge["target"]["foreignKey"]
             
-            # Edge connects nodes through view keys and foreign keys
+            # Edge connects nodes through view keys and foreign keys with unique alias to allow multiple edges from same table
             edges_list.append(
-                f"    {view_name}\n"
+                f"    {view_name} AS edge_{label.lower()}\n"
                 f"      KEY ({source_fk}, {target_fk})\n"
                 f"      SOURCE KEY ({source_fk}) REFERENCES v_{source_node} ({source_key})\n"
                 f"      DESTINATION KEY ({target_fk}) REFERENCES v_{target_node} ({target_key})\n"
