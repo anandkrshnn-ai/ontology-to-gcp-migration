@@ -326,9 +326,10 @@ with tab1:
                                 # Apply compiled DDLs (strip trailing semicolons required by Spanner update_ddl API)
                                 ddl_statements = [stmt.rstrip(";") for stmt in compilation_plan["actions"] if stmt.strip()]
                                 # Prepend DROP PROPERTY GRAPH to break the dependency lock on views
-                                if graph_yaml:
-                                    graph_name = graph_yaml.get("spec", {}).get("graphName", "air_routing_graph")
-                                    ddl_statements.insert(0, f"DROP PROPERTY GRAPH IF EXISTS {graph_name}")
+                                # (Disabled to support Spanner Standard Edition / Free Trial)
+                                # if graph_yaml:
+                                #     graph_name = graph_yaml.get("spec", {}).get("graphName", "air_routing_graph")
+                                #     ddl_statements.insert(0, f"DROP PROPERTY GRAPH IF EXISTS {graph_name}")
                                 
                                 if ddl_statements:
                                     st.info(f"Deploying {len(ddl_statements)} DDL statements to Spanner...")
@@ -344,6 +345,44 @@ with tab1:
                         except Exception as e:
                             st.error(f"Error executing schema apply: {e}")
                             
+            st.markdown("---")
+            st.markdown("##### Live Data Ingestion")
+            if st.button("Trigger Dataflow Bulk Load"):
+                import subprocess
+                st.info("Starting Dataflow ingestion via DirectRunner...")
+                log_container = st.empty()
+                log_text = ""
+                cmd = [
+                    "python", "dataflow/ontology_bulk_load/pipeline.py", 
+                    "--input_dir", "ontology/test_data",
+                    "--ontology_dir", "ontology/yamls",
+                    "--project_id", spanner_project,
+                    "--instance_id", spanner_instance, 
+                    "--database_id", spanner_database
+                ]
+                try:
+                    process = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        bufsize=1,
+                        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                        cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+                    )
+                    for line in iter(process.stdout.readline, ''):
+                        log_text += line
+                        log_text = log_text[-3000:]
+                        log_container.code(log_text, language="bash")
+                    process.stdout.close()
+                    process.wait(timeout=120)
+                    if process.returncode == 0:
+                        st.success("✔️ Dataflow ingestion completed successfully!")
+                    else:
+                        st.error(f"❌ Dataflow failed with exit code {process.returncode}")
+                except Exception as e:
+                    st.error(f"Pipeline execution failed: {e}")
+                    
             st.markdown("---")
             # Query Registry Tables
             if st.button("Query Active Registry Metadata"):
@@ -474,60 +513,9 @@ with tab3:
                                 } for row in rows]
                             }
                         else:
-                            st.warning("⚠️ No Spanner records returned. Seeding nodes to run the demo...")
-                            
-                            # Auto-seed basic data to make the live demo work instantly
-                            def _seed_spanner(transaction):
-                                transaction.execute_update(
-                                    "INSERT OR UPDATE INTO operation (operation_id, operation_type, location_code) VALUES "
-                                    "('OAK-STN', 'STATION', 'OAK'), "
-                                    "('MEM-HUB', 'HUB', 'MEM'), "
-                                    "('DAL-STN', 'STATION', 'DAL')"
-                                )
-                                transaction.execute_update(
-                                    "INSERT OR UPDATE INTO network_routing (routing_id, origin_operation_id, destination_operation_id, service_commit, zulu_day) VALUES "
-                                    "('NR-001', 'OAK-STN', 'DAL-STN', '2-DAY', '2026-06-18')"
-                                )
-                                transaction.execute_update(
-                                    "INSERT OR UPDATE INTO network_routing_segment (segment_id, routing_id, origin_operation_id, destination_operation_id, transport_mode, weight, pieces, zulu_day) VALUES "
-                                    "('SEG-001', 'NR-001', 'OAK-STN', 'OAK-RAMP', 'SURFACE', 1450, 62, '2026-06-18'), "
-                                    "('SEG-002', 'NR-001', 'OAK-RAMP', 'MEM-HUB', 'AIR', 1450, 62, '2026-06-18')"
-                                )
-                                transaction.execute_update(
-                                    "INSERT OR UPDATE INTO transit_path (transit_path_id, segment_id, total_transit_minutes) VALUES "
-                                    "('TP-001', 'SEG-002', 215)"
-                                )
-                            
-                            registry_manager.spanner_db.run_in_transaction(_seed_spanner)
-                            st.info("Successfully seeded demo data in Spanner! Re-running query...")
-                            
-                            # Retry with a FRESH snapshot — single-use snapshots cannot be re-used
-                            with registry_manager.spanner_db.snapshot() as retry_snapshot:
-                                retry_results = retry_snapshot.execute_sql(
-                                    sql_query,
-                                    params={"routing_id": "NR-001"},
-                                    param_types={"routing_id": spanner.param_types.STRING}
-                                )
-                                rows = list(retry_results)
-                            
-                            if rows:
-                                graph_expansion = {
-                                    "start_node": {
-                                        "id": "NR-001",
-                                        "details": {"routing_id": rows[0][0], "service_commit": rows[0][1]}
-                                    },
-                                    "connections": [{
-                                        "target_segment_id": row[2],
-                                        "transport_mode": row[3],
-                                        "weight": row[4],
-                                        "segment_details": {"status": "ACTIVE"}
-                                    } for row in rows]
-                                }
-                            else:
-                                # Seeding succeeded but views may not be ready yet — use simulator
-                                st.warning("Seed complete but views returned no rows yet. Using simulated graph context.")
-                                graph_db = SpannerGraphSimulator()
-                                graph_expansion = graph_db.execute_graph_expansion("NR-001")
+                            st.warning("⚠️ No Spanner records returned. Run Dataflow ingestion in Tab 1 to load the data!")
+                            graph_db = SpannerGraphSimulator()
+                            graph_expansion = graph_db.execute_graph_expansion("NR-001")
                 except Exception as ge:
                     st.error(f"GCP Spanner Graph relational query failed: {ge}")
                     # Fallback to simulated mapping to keep the presentation running
@@ -689,23 +677,29 @@ with tab5:
         # Build network graph
         net = Network(height="600px", width="100%", directed=True, bgcolor="#0d0f14", font_color="#e0e0e0")
         
-        # We will use the seeded data representing the central hub MEM-HUB and surrounding segments
-        # Add Nodes
-        net.add_node("OAK-STN", label="OAK-STN", color="#4ECDC4", shape="dot", size=20)
-        net.add_node("OAK-RAMP", label="OAK-RAMP", color="#4ECDC4", shape="dot", size=20)
-        net.add_node("MEM-HUB", label="MEM-HUB", color="#FF6B6B", shape="star", size=35, title="Central Routing Hub")
-        net.add_node("DAL-RAMP", label="DAL-RAMP", color="#FFE66D", shape="dot", size=20)
-        net.add_node("DAL-STN", label="DAL-STN", color="#FFE66D", shape="dot", size=20)
-        net.add_node("ORD-RAMP", label="ORD-RAMP", color="#45B7D1", shape="dot", size=20)
-        net.add_node("ORD-STN", label="ORD-STN", color="#45B7D1", shape="dot", size=20)
-        
-        # Add Edges
-        net.add_edge("OAK-STN", "OAK-RAMP", label="SEG-001 (SURFACE)", color="#8a99ad")
-        net.add_edge("OAK-RAMP", "MEM-HUB", label="SEG-002 (AIR)", color="#1a73e8", width=3)
-        net.add_edge("MEM-HUB", "DAL-RAMP", label="SEG-003 (AIR)", color="#1a73e8", width=3)
-        net.add_edge("DAL-RAMP", "DAL-STN", label="SEG-004 (SURFACE)", color="#8a99ad")
-        net.add_edge("ORD-STN", "ORD-RAMP", label="SEG-011 (SURFACE)", color="#8a99ad")
-        net.add_edge("ORD-RAMP", "MEM-HUB", label="SEG-012 (AIR)", color="#1a73e8", width=3)
+        if is_live:
+            try:
+                with registry_manager.spanner_db.snapshot() as snapshot:
+                    # Query Operations
+                    nodes_res = snapshot.execute_sql("SELECT operation_id, operation_type, location_code FROM v_operation")
+                    for row in nodes_res:
+                        op_id, op_type, loc_code = row
+                        color = "#FF6B6B" if op_type == "HUB" else ("#4ECDC4" if op_type == "STATION" else "#FFE66D")
+                        size = 30 if op_type == "HUB" else 20
+                        shape = "star" if op_type == "HUB" else "dot"
+                        net.add_node(op_id, label=op_id, color=color, shape=shape, size=size, title=f"Type: {op_type}")
+                    
+                    # Query Segments
+                    edges_res = snapshot.execute_sql("SELECT origin_operation_id, destination_operation_id, segment_id, transport_mode FROM v_network_routing_segment")
+                    for row in edges_res:
+                        orig, dest, seg_id, mode = row
+                        color = "#1a73e8" if mode == "AIR" else "#8a99ad"
+                        width = 3 if mode == "AIR" else 1
+                        net.add_edge(orig, dest, label=f"{seg_id} ({mode})", color=color, width=width)
+            except Exception as e:
+                st.error(f"Error querying graph data from Spanner: {e}")
+        else:
+            st.warning("Connect to Live Spanner to view dynamic graph data. Run ingestion to populate.")
         
         # Configure physics for better layout
         net.set_options("""
@@ -733,4 +727,9 @@ with tab5:
         components.html(html_content, height=620)
         
     st.info("💡 **Impact Analysis:** The graph above highlights how multiple routings depend on the `MEM-HUB` central node. This is a visual representation of the property graph queries that power the GraphRAG serving plane.")
+    
+    if st.button("🔄 Refresh Graph"):
+        st.cache_data.clear()
+        st.rerun()
+        
     st.markdown("</div>", unsafe_allow_html=True)

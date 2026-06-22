@@ -240,9 +240,10 @@ class GraphCompiler:
                     actions.append(view_ddl)
                     
         # 3. Generate Property Graph DDL
-        if graph_yaml:
-            graph_ddl = self.generate_property_graph_ddl(graph_yaml)
-            actions.append(graph_ddl)
+        # (Disabled for Demo to avoid Spanner Enterprise $20/day costs)
+        # if graph_yaml:
+        #     graph_ddl = self.generate_property_graph_ddl(graph_yaml)
+        #     actions.append(graph_ddl)
             
         return {
             "status": "APPROVED",
