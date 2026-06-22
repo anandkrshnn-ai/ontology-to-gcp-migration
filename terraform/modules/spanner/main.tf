@@ -2,6 +2,7 @@ resource "google_spanner_instance" "main" {
   name             = var.instance_name
   config           = "regional-${var.region}"
   display_name     = "Ontology Graph Platform"
+  edition          = "ENTERPRISE"
   processing_units = var.processing_units
   project          = var.project_id
   
