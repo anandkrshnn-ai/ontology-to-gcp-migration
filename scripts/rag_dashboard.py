@@ -679,9 +679,9 @@ with tab5:
         
         if is_live:
             try:
-                with registry_manager.spanner_db.snapshot() as snapshot:
+                with registry_manager.spanner_db.snapshot() as snapshot1:
                     # Query Operations
-                    nodes_res = snapshot.execute_sql("SELECT operation_id, operation_type, location_code FROM v_operation")
+                    nodes_res = snapshot1.execute_sql("SELECT operation_id, operation_type, location_code FROM v_operation")
                     for row in nodes_res:
                         op_id, op_type, loc_code = row
                         color = "#FF6B6B" if op_type == "HUB" else ("#4ECDC4" if op_type == "STATION" else "#FFE66D")
@@ -689,8 +689,9 @@ with tab5:
                         shape = "star" if op_type == "HUB" else "dot"
                         net.add_node(op_id, label=op_id, color=color, shape=shape, size=size, title=f"Type: {op_type}")
                     
+                with registry_manager.spanner_db.snapshot() as snapshot2:
                     # Query Segments
-                    edges_res = snapshot.execute_sql("SELECT origin_operation_id, destination_operation_id, segment_id, transport_mode FROM v_network_routing_segment")
+                    edges_res = snapshot2.execute_sql("SELECT origin_operation_id, destination_operation_id, segment_id, transport_mode FROM v_network_routing_segment")
                     for row in edges_res:
                         orig, dest, seg_id, mode = row
                         color = "#1a73e8" if mode == "AIR" else "#8a99ad"
