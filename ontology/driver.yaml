@@ -1,0 +1,26 @@
+apiVersion: logistics.ontology/v1
+kind: ObjectType
+metadata:
+  name: Driver
+  domain: Logistics
+  version: 1.0.0
+  steward: logistics-ontology-team
+  description: A certified human operator for logistics vehicles.
+spec:
+  table: driver
+  primaryKey: [driver_id]
+  attributes:
+    - name: driver_id
+      type: STRING(64)
+      required: true
+    - name: certification_level
+      type: STRING(64)
+      required: false
+    - name: status
+      type: STRING(64)
+      required: false
+  rules:
+    - id: DRV-001
+      description: Driver status must be ACTIVE or OFF_DUTY.
+      expression: status IN ('ACTIVE', 'OFF_DUTY')
+      severity: reject

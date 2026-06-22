@@ -1,15 +1,26 @@
-objectType: Vehicle
-description: "A logistics transport vehicle mapped to the network."
-properties:
-  vehicle_id:
-    type: STRING
-    isPrimary: true
-  vehicle_type:
-    type: STRING
-  max_weight_capacity:
-    type: INT64
-rules:
-  - ruleId: VEH-001
-    description: "Vehicle weight capacity must be greater than zero."
-    property: max_weight_capacity
-    condition: "> 0"
+apiVersion: logistics.ontology/v1
+kind: ObjectType
+metadata:
+  name: Vehicle
+  domain: Logistics
+  version: 1.0.0
+  steward: logistics-ontology-team
+  description: A logistics transport vehicle mapped to the network.
+spec:
+  table: vehicle
+  primaryKey: [vehicle_id]
+  attributes:
+    - name: vehicle_id
+      type: STRING(64)
+      required: true
+    - name: vehicle_type
+      type: STRING(64)
+      required: false
+    - name: max_weight_capacity
+      type: INT64
+      required: false
+  rules:
+    - id: VEH-001
+      description: Vehicle weight capacity must be greater than zero.
+      expression: max_weight_capacity > 0
+      severity: reject

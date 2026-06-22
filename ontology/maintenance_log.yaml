@@ -1,0 +1,29 @@
+apiVersion: logistics.ontology/v1
+kind: ObjectType
+metadata:
+  name: MaintenanceLog
+  domain: Logistics
+  version: 1.0.0
+  steward: logistics-ontology-team
+  description: Telemetry logs recording maintenance events.
+spec:
+  table: maintenance_log
+  primaryKey: [log_id]
+  attributes:
+    - name: log_id
+      type: STRING(64)
+      required: true
+    - name: vehicle_id
+      type: STRING(64)
+      required: false
+    - name: issue_type
+      type: STRING(64)
+      required: false
+    - name: severity
+      type: INT64
+      required: false
+  rules:
+    - id: ML-001
+      description: Severity must be between 1 and 5.
+      expression: severity >= 1 AND severity <= 5
+      severity: reject
