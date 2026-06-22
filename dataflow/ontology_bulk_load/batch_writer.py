@@ -1,5 +1,6 @@
 import apache_beam as beam
 from google.cloud import spanner
+from google.api_core.client_options import ClientOptions
 
 class SpannerWriteDoFn(beam.DoFn):
     def __init__(self, project_id, instance_id, database_id, table_name):
@@ -9,12 +10,23 @@ class SpannerWriteDoFn(beam.DoFn):
         self.table_name = table_name
 
     def setup(self):
-        self.client = spanner.Client(project=self.project_id)
+        options = ClientOptions(quota_project_id=self.project_id)
+        self.client = spanner.Client(project=self.project_id, client_options=options)
         self.instance = self.client.instance(self.instance_id)
         self.database = self.instance.database(self.database_id)
 
     def process(self, element):
-        clean_row = {k: v for k, v in element.items() if v != ''}
+        clean_row = {}
+        for k, v in element.items():
+            if v != '':
+                if isinstance(v, str) and v.isdigit():
+                    clean_row[k] = int(v)
+                else:
+                    try:
+                        clean_row[k] = float(v) if '.' in str(v) else v
+                    except ValueError:
+                        clean_row[k] = v
+
         with self.database.batch() as batch:
             batch.insert_or_update(
                 table=self.table_name,
@@ -42,7 +54,8 @@ class AuditWriteDoFn(beam.DoFn):
         self.database_id = database_id
 
     def setup(self):
-        self.client = spanner.Client(project=self.project_id)
+        options = ClientOptions(quota_project_id=self.project_id)
+        self.client = spanner.Client(project=self.project_id, client_options=options)
         self.instance = self.client.instance(self.instance_id)
         self.database = self.instance.database(self.database_id)
 
