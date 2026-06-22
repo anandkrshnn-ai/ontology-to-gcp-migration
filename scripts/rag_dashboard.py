@@ -355,7 +355,7 @@ with tab1:
                 cmd = [
                     "python", "dataflow/ontology_bulk_load/pipeline.py", 
                     "--input_dir", "ontology/test_data",
-                    "--ontology_dir", "ontology/yamls",
+                    "--ontology_dir", "ontology",
                     "--project_id", spanner_project,
                     "--instance_id", spanner_instance, 
                     "--database_id", spanner_database
