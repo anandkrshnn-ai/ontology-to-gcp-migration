@@ -8,8 +8,8 @@ import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
 from apache_beam.io.filesystems import FileSystems
 
-from dataflow.ontology_bulk_load.validate_fn import ValidateRow
-from dataflow.ontology_bulk_load.batch_writer import SpannerBatchWriter, AuditBatchWriter
+from validate_fn import ValidateRow
+from batch_writer import SpannerBatchWriter, AuditBatchWriter
 
 
 def load_ontology_rules(ontology_dir):
