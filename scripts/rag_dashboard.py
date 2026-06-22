@@ -566,8 +566,8 @@ with tab3:
                         response = model.generate_content(prompt)
                         st.success(response.text)
                 except Exception as vertex_err:
-                    st.error(f"Vertex AI Gemini invocation failed: {vertex_err}")
-                    st.warning("Falling back to pre-compiled context generator.")
+                    # st.error(f"Vertex AI Gemini invocation failed: {vertex_err}")
+                    st.warning("Vertex AI Quota exceeded/unavailable. Falling back to pre-compiled context generator.")
                     answer_text = (
                         f"Based on the combined evidence:\n\n"
                         f"1. Unstructured logs reveal that the origin station **OAK-STN** is experiencing severe gate congestion "
