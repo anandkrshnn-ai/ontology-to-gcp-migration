@@ -56,3 +56,13 @@ CREATE TABLE deployment_audit (
     status STRING(50) NOT NULL, -- SUCCESS, FAILED
     error_message STRING(MAX)
 ) PRIMARY KEY (deployment_id);
+
+CREATE TABLE rule_audit (
+    audit_id STRING(36) NOT NULL,
+    table_name STRING(256) NOT NULL,
+    row_key STRING(256) NOT NULL,
+    rule_id STRING(50) NOT NULL,
+    status STRING(50) NOT NULL, -- PASS, FAIL
+    error_message STRING(MAX),
+    evaluated_at TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true)
+) PRIMARY KEY (audit_id);

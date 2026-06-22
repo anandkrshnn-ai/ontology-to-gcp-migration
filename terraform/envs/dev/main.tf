@@ -25,20 +25,20 @@ variable "access_policy_name" {
   default = ""
 }
 
-module "landing_zone" {
-  source             = "../../modules/landing_zone"
-  project_id         = var.project_id
-  primary_region     = var.primary_region
-  org_id             = var.org_id
-  access_policy_name = var.access_policy_name
-}
+# module "landing_zone" {
+#   source             = "../../modules/landing_zone"
+#   project_id         = var.project_id
+#   primary_region     = var.primary_region
+#   org_id             = var.org_id
+#   access_policy_name = var.access_policy_name
+# }
 
-module "data_foundation" {
-  source         = "../../modules/data_foundation"
-  project_id     = var.project_id
-  primary_region = var.primary_region
-  environment    = "dev"
-}
+# module "data_foundation" {
+#   source         = "../../modules/data_foundation"
+#   project_id     = var.project_id
+#   primary_region = var.primary_region
+#   environment    = "dev"
+# }
 
 module "spanner_database" {
   source           = "../../modules/spanner"
@@ -47,4 +47,11 @@ module "spanner_database" {
   instance_name    = "ontology-graph-platform-unique"
   database_name    = "ontology_graph_platform_unique"
   processing_units = 100
+}
+
+resource "google_artifact_registry_repository" "dataflow_workers" {
+  location      = var.primary_region
+  repository_id = "dataflow-workers"
+  description   = "Docker repository for custom Dataflow worker images"
+  format        = "DOCKER"
 }

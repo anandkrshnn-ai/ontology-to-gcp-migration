@@ -227,10 +227,11 @@ if "last_conn_mode" not in st.session_state or st.session_state.last_conn_mode !
         del st.session_state.vector_store
 
 # Tabs
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🎛️ Control Plane (Compiler)", 
     "📥 Ingestion Zone (Telemetry)", 
     "🔍 Serving Plane (GraphRAG)",
+    "🛡️ Governance & Audit",
     "🌐 Graph Explorer"
 ])
 
@@ -632,8 +633,54 @@ with tab3:
             st.success(answer_text)
     st.markdown("</div>", unsafe_allow_html=True)
 
-# TAB 4: Graph Explorer
+# TAB 4: Governance & Audit
 with tab4:
+    st.markdown("### Governance & Compliance Logs")
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("Dataflow Rule Audit Logs")
+    st.info("💡 Shows the results of the YAML rules evaluated against incoming telemetry data during the Dataflow ingestion pipeline.")
+    
+    if st.button("Query Rule Audit Table"):
+        if is_live:
+            try:
+                with registry_manager.spanner_db.snapshot() as snapshot:
+                    query = "SELECT table_name, row_key, rule_id, status, error_message, evaluated_at FROM rule_audit ORDER BY evaluated_at DESC LIMIT 50"
+                    results = snapshot.execute_sql(query)
+                    rows = list(results)
+                    if rows:
+                        import pandas as pd
+                        df = pd.DataFrame(rows, columns=["table_name", "row_key", "rule_id", "status", "error_message", "evaluated_at"])
+                        
+                        # Apply coloring to status
+                        def color_status(val):
+                            color = '#00C853' if val == 'PASS' else '#D50000'
+                            return f'color: {color}; font-weight: bold;'
+                            
+                        st.dataframe(df.style.map(color_status, subset=['status']), use_container_width=True)
+                    else:
+                        st.warning("No audit logs found. Run the Dataflow pipeline first.")
+            except Exception as e:
+                st.error(f"Error querying rule_audit table: {e}")
+        else:
+            st.warning("Connect to Live Google Cloud Spanner to view real audit logs.")
+            
+            # Mock Data
+            st.markdown("**Simulated Audit Logs**")
+            import pandas as pd
+            mock_data = [
+                {"table_name": "network_routing", "row_key": "NR-001", "rule_id": "NR-001", "status": "PASS", "error_message": "", "evaluated_at": "2026-06-22T10:00:00Z"},
+                {"table_name": "network_routing_segment", "row_key": "SEG-005", "rule_id": "SEG-002", "status": "FAIL", "error_message": "origin (OAK) == destination (OAK)", "evaluated_at": "2026-06-22T10:05:00Z"}
+            ]
+            df = pd.DataFrame(mock_data)
+            def color_status(val):
+                color = '#00C853' if val == 'PASS' else '#D50000'
+                return f'color: {color}; font-weight: bold;'
+            st.dataframe(df.style.map(color_status, subset=['status']), use_container_width=True)
+            
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# TAB 5: Graph Explorer
+with tab5:
     st.markdown("### Interactive Network Graph Visualization")
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Ontology Routing Dependencies")

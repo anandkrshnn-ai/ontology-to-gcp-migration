@@ -55,5 +55,15 @@ steps:
         cd terraform/envs/dev
         terraform plan -var-file="terraform.tfvars" -input=false
 
+  # 6. Schema Drift Check (fails build if DB has out-of-band changes)
+  - name: 'python:3.11-slim'
+    id: 'drift-check'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        pip install -r requirements.txt
+        python scripts/drift_detector.py --ontology_dir=ontology --instance=ontology-demo --database=ontology-db
+
 options:
   logging: CLOUD_LOGGING_ONLY
