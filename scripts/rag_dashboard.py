@@ -551,15 +551,20 @@ with tab3:
             with st.spinner("Synthesizing answer using Google Vertex AI (Gemini 1.5)..."):
                 try:
                     vertexai.init(project=spanner_project, location="us-central1")
-                    model = GenerativeModel("gemini-1.5-flash-001")
                     prompt = (
                         f"You are a helpful logistics and infrastructure database assistant. Answer the user query using ONLY the provided contexts.\n\n"
                         f"Context details:\n{context_payload}\n\n"
                         f"User Query: {active_query}\n\n"
                         f"Answer:"
                     )
-                    response = model.generate_content(prompt)
-                    st.success(response.text)
+                    try:
+                        model = GenerativeModel("gemini-1.5-flash-001")
+                        response = model.generate_content(prompt)
+                        st.success(response.text)
+                    except Exception as fallback_err:
+                        model = GenerativeModel("gemini-1.0-pro-001")
+                        response = model.generate_content(prompt)
+                        st.success(response.text)
                 except Exception as vertex_err:
                     st.error(f"Vertex AI Gemini invocation failed: {vertex_err}")
                     st.warning("Falling back to pre-compiled context generator.")
