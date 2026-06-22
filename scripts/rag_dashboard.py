@@ -551,7 +551,7 @@ with tab3:
             with st.spinner("Synthesizing answer using Google Vertex AI (Gemini 1.5)..."):
                 try:
                     vertexai.init(project=spanner_project, location="us-central1")
-                    model = GenerativeModel("gemini-1.5-flash")
+                    model = GenerativeModel("gemini-1.5-flash-001")
                     prompt = (
                         f"You are a helpful logistics and infrastructure database assistant. Answer the user query using ONLY the provided contexts.\n\n"
                         f"Context details:\n{context_payload}\n\n"
@@ -579,7 +579,7 @@ with tab3:
                 try:
                     import google.generativeai as genai
                     genai.configure(api_key=gemini_key)
-                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    model = genai.GenerativeModel('gemini-1.5-flash-001')
                     
                     prompt = (
                         f"You are a helpful logistics and infrastructure database assistant. Answer the user query using ONLY the provided contexts.\n\n"
