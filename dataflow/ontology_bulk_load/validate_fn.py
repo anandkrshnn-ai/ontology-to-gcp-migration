@@ -36,7 +36,7 @@ class ValidateRow(beam.DoFn):
                 "rule_id": rule_id,
                 "status": "PASS" if passed else "FAIL",
                 "error_message": error_msg,
-                "evaluated_at": datetime.now(timezone.utc).isoformat() + "Z"
+                "evaluated_at": datetime.now(timezone.utc)
             })
             
             if not passed:
