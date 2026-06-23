@@ -11,6 +11,8 @@ spec:
   primaryKey: [log_id]
   sourceKey: vehicle_id
   targetKey: log_id
+  sourceType: vehicle
+  targetType: maintenance_log
   attributes:
     - name: log_id
       type: STRING(64)

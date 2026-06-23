@@ -11,6 +11,8 @@ spec:
   primaryKey: [driver_id]
   sourceKey: driver_id
   targetKey: vehicle_id
+  sourceType: driver
+  targetType: vehicle
   attributes:
     - name: driver_id
       type: STRING(64)

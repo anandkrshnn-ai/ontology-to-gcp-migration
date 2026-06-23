@@ -5,6 +5,8 @@ spec:
   primaryKey: [segment_id]
   sourceKey: origin_operation_id
   targetKey: destination_operation_id
+  sourceType: operation
+  targetType: operation
   attributes:
     - name: segment_id
       type: STRING(64)
