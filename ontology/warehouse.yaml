@@ -1,0 +1,35 @@
+apiVersion: logistics.ontology/v1
+kind: ObjectType
+metadata:
+  name: Warehouse
+  domain: Logistics
+  version: 1.0.0
+  steward: logistics-ontology-team
+  description: A physical storage facility in the logistics network.
+spec:
+  table: warehouse
+  primaryKey: [warehouse_id]
+  attributes:
+    - name: warehouse_id
+      type: STRING(64)
+      required: true
+    - name: warehouse_name
+      type: STRING(256)
+      required: false
+    - name: location_city
+      type: STRING(128)
+      required: false
+    - name: location_country
+      type: STRING(64)
+      required: false
+    - name: capacity_sqm
+      type: FLOAT64
+      required: false
+    - name: is_active
+      type: BOOL
+      required: false
+  rules:
+    - id: WH-001
+      description: Warehouse capacity must be greater than zero.
+      expression: capacity_sqm > 0
+      severity: reject
