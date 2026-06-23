@@ -1,9 +1,15 @@
-import argparse
-import logging
 import os
+import logging
+
+# Suppress noisy INFO logs from Beam and Spanner metrics
+logging.getLogger("root").setLevel(logging.WARNING)
+logging.getLogger("apache_beam").setLevel(logging.WARNING)
+logging.getLogger("google.cloud.spanner").setLevel(logging.WARNING)
+os.environ["GOOGLE_CLOUD_DISABLE_GRPC_METRICS"] = "true"
+
+import argparse
 import yaml
 import csv
-
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions, SetupOptions
 from apache_beam.io.filesystems import FileSystems

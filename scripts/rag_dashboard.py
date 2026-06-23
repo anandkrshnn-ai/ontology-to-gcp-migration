@@ -463,6 +463,15 @@ with tab1:
                         cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
                     )
                     for line in iter(process.stdout.readline, ''):
+                        # Filter out noisy INFO lines before displaying
+                        if any(skip in line for skip in [
+                            "INFO:root:Missing pipeline",
+                            "INFO:apache_beam",
+                            "Failed to export metrics",
+                            "Creating state cache",
+                            "INFO:root:Running"
+                        ]):
+                            continue
                         log_text += line
                         log_text = log_text[-3000:]
                         log_container.code(log_text, language="bash")
