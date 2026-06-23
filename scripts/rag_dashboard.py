@@ -164,40 +164,54 @@ st.session_state.yamls = yamls
 def load_ontology_graph_config(yaml_dict: dict) -> dict:
     nodes = []
     edges = []
+    
+    table_to_attrs = {}
+    for f_name, content in yaml_dict.items():
+        try:
+            spec = yaml.safe_load(content)
+            if not spec: continue
+            if spec.get("kind") == "ObjectType":
+                table = spec.get("spec", {}).get("table")
+                attrs = [a["name"] for a in spec.get("spec", {}).get("attributes", [])]
+                if table:
+                    table_to_attrs[table] = attrs
+        except Exception:
+            pass
+
     for f_name, content in yaml_dict.items():
         try:
             spec = yaml.safe_load(content)
             if not spec: continue
             kind = spec.get("kind")
-            table = spec.get("spec", {}).get("table")
-            pk = spec.get("spec", {}).get("primaryKey", [])
-            pk = pk[0] if pk else None
-            attrs = [a["name"] for a in spec.get("spec", {}).get("attributes", [])]
             
-            if kind == "ObjectType":
-                if table and pk:
-                    nodes.append({
-                        "view": f"v_{table}",
-                        "table": table,
-                        "key": pk,
-                        "properties": attrs,
-                    })
-            elif kind == "RelationshipType":
-                source_key = spec.get("spec", {}).get("sourceKey")
-                target_key = spec.get("spec", {}).get("targetKey")
-                if not source_key or not target_key:
-                    continue
-                if table and pk:
-                    edges.append({
-                        "view": f"v_{table}",
-                        "table": table,
-                        "key": pk,
-                        "source": source_key,
-                        "target": target_key,
-                        "properties": attrs,
-                    })
+            if kind == "PropertyGraph":
+                for n in spec.get("spec", {}).get("nodes", []):
+                    table = n.get("tableName")
+                    pk = n.get("key")
+                    if table and pk:
+                        nodes.append({
+                            "view": f"v_{table}",
+                            "table": table,
+                            "key": pk,
+                            "properties": table_to_attrs.get(table, []),
+                        })
+                for e in spec.get("spec", {}).get("edges", []):
+                    table = e.get("tableName")
+                    pk = e.get("key")
+                    source_col = e.get("source", {}).get("foreignKey")
+                    target_col = e.get("target", {}).get("foreignKey")
+                    if table and pk and source_col and target_col:
+                        edges.append({
+                            "view": f"v_{table}",
+                            "table": e.get("label", table),
+                            "key": pk,
+                            "source": source_col,
+                            "target": target_col,
+                            "properties": table_to_attrs.get(table, []),
+                        })
         except Exception:
             pass
+            
     return {"nodes": nodes, "edges": edges}
 
 def safe_json(props: dict) -> dict:
@@ -802,9 +816,10 @@ with tab5:
                         size = 30 if op_type == "HUB" else 15
                         
                         title_text = "\n".join(f"{k}: {v}" for k, v in props.items())
+                        node_label = str(props.get("location_code") or props.get("operation_id") or key)
                         net.add_node(
                             key,
-                            label=key,
+                            label=node_label,
                             title=title_text,
                             color=entity_color,
                             size=size
@@ -826,15 +841,40 @@ with tab5:
         
         # Configure physics for better layout
         net.set_options("""
-        var options = {
-          "physics": {
-            "hierarchicalRepulsion": {
-              "centralGravity": 0.0,
-              "springLength": 150,
-              "nodeDistance": 150
+        {
+          "nodes": {
+            "font": {
+              "size": 14,
+              "color": "#FFFFFF"
             },
-            "minVelocity": 0.75,
-            "solver": "hierarchicalRepulsion"
+            "borderWidth": 2,
+            "shadow": true
+          },
+          "edges": {
+            "width": 2,
+            "shadow": true,
+            "smooth": {
+              "type": "curvedCW",
+              "roundness": 0.2
+            }
+          },
+          "physics": {
+            "enabled": true,
+            "forceAtlas2Based": {
+              "gravitationalConstant": -50,
+              "centralGravity": 0.01,
+              "springLength": 100,
+              "springConstant": 0.08
+            },
+            "solver": "forceAtlas2Based",
+            "stabilization": {
+              "iterations": 150
+            }
+          },
+          "interaction": {
+            "hover": true,
+            "tooltipDelay": 100,
+            "navigationButtons": true
           }
         }
         """)
