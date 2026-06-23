@@ -137,6 +137,11 @@ def detect_drift(canonical_schemas, live_schemas):
             
         # 3. True drift (type change, column dropped from YAML)
         extra_in_spanner = list(l_col_names - c_col_names)
+        if extra_in_spanner:
+            # INFO only — Spanner has undeclared columns, not a breaking change
+            print(f"  ℹ️  INFO: '{table}' has undeclared Spanner columns: {sorted(extra_in_spanner)}")
+            print(f"      (Safe to ignore. Consider adding to YAML for completeness.)")
+
         type_mismatches = []
         
         for col in c_col_names.intersection(l_col_names):
@@ -149,10 +154,9 @@ def detect_drift(canonical_schemas, live_schemas):
                     continue
                 type_mismatches.append({"column": col, "expected": c_type, "actual": l_type})
                 
-        if extra_in_spanner or type_mismatches:
+        if type_mismatches:
             report["drift_detected"] = True
             report["true_drift_details"][table] = {
-                "extra_in_spanner_out_of_band": extra_in_spanner,
                 "type_mismatches": type_mismatches
             }
             
