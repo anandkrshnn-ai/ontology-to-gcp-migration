@@ -1,5 +1,11 @@
-apiVersion: routing.ontology/v1
+apiVersion: logistics.ontology/v1
 kind: RelationshipType
+metadata:
+  name: NetworkRoutingSegment
+  domain: Logistics
+  version: 1.0.0
+  steward: logistics-ontology-team
+  description: A segment linking two operations in a network routing path.
 spec:
   table: network_routing_segment
   primaryKey: [segment_id]
@@ -13,50 +19,22 @@ spec:
       required: true
     - name: routing_id
       type: STRING(64)
-      required: true
+      required: false
     - name: origin_operation_id
       type: STRING(64)
-      required: true
+      required: false
     - name: destination_operation_id
       type: STRING(64)
-      required: true
+      required: false
     - name: transport_mode
-      type: STRING(16)
-      enum: [AIR, SURFACE]
+      type: STRING(64)
+      required: false
     - name: weight
-      type: NUMERIC
+      type: FLOAT64
+      required: false
     - name: pieces
       type: INT64
+      required: false
     - name: zulu_day
-      type: DATE
-      required: true
-  relationships:
-    - name: belongs_to_routing
-      edge: BELONGS_TO
-      target: NetworkRouting
-      cardinality: many_to_one
-      via: { localKey: routing_id, targetKey: routing_id }
-      required: true
-    - name: origin
-      edge: ORIGINATES_AT
-      target: Operation
-      cardinality: many_to_one
-      via: { localKey: origin_operation_id, targetKey: operation_id }
-      required: true
-    - name: destination
-      edge: TERMINATES_AT
-      target: Operation
-      cardinality: many_to_one
-      via: { localKey: destination_operation_id, targetKey: operation_id }
-      required: true
-    - name: satisfied_by
-      edge: SATISFIED_BY
-      target: TransitPath
-      cardinality: one_to_many
-  rules:
-    - id: NRS-001
-      expression: origin_operation_id != destination_operation_id
-      severity: reject
-    - id: NRS-002
-      expression: routing_id IS NOT NULL
-      severity: reject
+      type: STRING(64)
+      required: false
