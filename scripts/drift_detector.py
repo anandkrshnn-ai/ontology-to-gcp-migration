@@ -101,19 +101,26 @@ def detect_drift(canonical_schemas, live_schemas):
     """
     report = {
         "drift_detected": False,
-        "tables_missing_in_spanner": [],
-        "tables_missing_in_yaml": [],
-        "column_drift": {}
+        "pending_evolution": {
+            "tables_to_create": [],
+            "columns_to_add": {}
+        },
+        "true_drift_details": {}
     }
     
     canonical_tables = set(canonical_schemas.keys())
     live_tables = set(live_schemas.keys())
     
-    report["tables_missing_in_spanner"] = list(canonical_tables - live_tables)
-    report["tables_missing_in_yaml"] = list(live_tables - canonical_tables)
-    
-    if report["tables_missing_in_spanner"] or report["tables_missing_in_yaml"]:
+    # 1. New tables (present in YAML, absent in Spanner)
+    tables_to_create = list(canonical_tables - live_tables)
+    if tables_to_create:
+        report["pending_evolution"]["tables_to_create"] = tables_to_create
+        
+    # Extra tables in Spanner (missing in YAML) - True Drift
+    tables_missing_in_yaml = list(live_tables - canonical_tables)
+    if tables_missing_in_yaml:
         report["drift_detected"] = True
+        report["true_drift_details"]["tables_missing_in_yaml"] = tables_missing_in_yaml
         
     # Check tables that exist in both
     for table in canonical_tables.intersection(live_tables):
@@ -123,7 +130,12 @@ def detect_drift(canonical_schemas, live_schemas):
         c_col_names = set(c_cols.keys())
         l_col_names = set(l_cols.keys())
         
-        missing_in_spanner = list(c_col_names - l_col_names)
+        # 2. New columns (present in YAML, absent in Spanner)
+        columns_to_add = list(c_col_names - l_col_names)
+        if columns_to_add:
+            report["pending_evolution"]["columns_to_add"][table] = columns_to_add
+            
+        # 3. True drift (type change, column dropped from YAML)
         extra_in_spanner = list(l_col_names - c_col_names)
         type_mismatches = []
         
@@ -137,10 +149,9 @@ def detect_drift(canonical_schemas, live_schemas):
                     continue
                 type_mismatches.append({"column": col, "expected": c_type, "actual": l_type})
                 
-        if missing_in_spanner or extra_in_spanner or type_mismatches:
+        if extra_in_spanner or type_mismatches:
             report["drift_detected"] = True
-            report["column_drift"][table] = {
-                "missing_in_spanner": missing_in_spanner,
+            report["true_drift_details"][table] = {
                 "extra_in_spanner_out_of_band": extra_in_spanner,
                 "type_mismatches": type_mismatches
             }
@@ -153,6 +164,7 @@ def main():
     parser.add_argument("--ontology_dir", required=True, help="Directory containing ontology YAML specifications")
     parser.add_argument("--instance", required=True, help="Spanner Instance ID")
     parser.add_argument("--database", required=True, help="Spanner Database ID")
+    parser.add_argument("--apply-mode", choices=["auto-additive", "manual", "strict"], default="auto-additive", help="How to handle pending evolution")
     
     args = parser.parse_args()
     
@@ -166,12 +178,28 @@ def main():
     report = detect_drift(canonical, live)
     
     if report["drift_detected"]:
-        print("\n❌ SCHEMA DRIFT DETECTED!")
-        print(json.dumps(report, indent=2))
+        print("\n❌ True schema drift detected (breaking).")
+        print(json.dumps(report["true_drift_details"], indent=2))
         sys.exit(1)
-    else:
-        print("\n✅ NO DRIFT DETECTED. Live Spanner schema matches canonical YAML specifications.")
-        sys.exit(0)
+        
+    has_evolution = bool(report["pending_evolution"]["tables_to_create"] or report["pending_evolution"]["columns_to_add"])
+    
+    if has_evolution:
+        if args.apply_mode == "strict":
+            print("\n❌ Strict mode: additive changes are not allowed.")
+            print(json.dumps(report["pending_evolution"], indent=2))
+            sys.exit(1)
+        elif args.apply_mode == "manual":
+            print("\n⚠️ Pending additive schema evolution. Approve to apply:")
+            print(json.dumps(report["pending_evolution"], indent=2))
+            sys.exit(0)
+        else:
+            print("\n✅ Auto-additive mode: pending evolution allowed.")
+            print(json.dumps(report["pending_evolution"], indent=2))
+            sys.exit(0)
+            
+    print("\n✅ NO DRIFT DETECTED. Live Spanner schema matches canonical YAML specifications.")
+    sys.exit(0)
 
 
 if __name__ == "__main__":
