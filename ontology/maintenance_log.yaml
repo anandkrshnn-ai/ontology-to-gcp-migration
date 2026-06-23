@@ -1,5 +1,5 @@
 apiVersion: logistics.ontology/v1
-kind: ObjectType
+kind: RelationshipType
 metadata:
   name: MaintenanceLog
   domain: Logistics
@@ -9,6 +9,8 @@ metadata:
 spec:
   table: maintenance_log
   primaryKey: [log_id]
+  sourceKey: vehicle_id
+  targetKey: log_id
   attributes:
     - name: log_id
       type: STRING(64)
