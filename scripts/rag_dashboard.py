@@ -828,8 +828,23 @@ with tab5:
             except Exception as e:
                 st.error(f"Error querying graph data from Spanner: {e}")
         else:
-            st.warning("Connect to Live Spanner to view dynamic graph data. Run ingestion to populate.")
-        
+            # SIMULATED MODE: build ontology-schema graph from YAML definitions
+            config = load_ontology_graph_config(st.session_state.yamls)
+            node_colors = ["#1a73e8", "#F4A623", "#00bfa5", "#9C27B0", "#E91E8C", "#FF5722", "#607D8B"]
+            for idx, node in enumerate(config["nodes"]):
+                color = node_colors[idx % len(node_colors)]
+                title = f"Table: {node['table']}\nPK: {node['key']}\nProps: {', '.join(node['properties'])}"
+                net.add_node(node["table"], label=node["table"], title=title, color=color, size=20)
+            for edge in config["edges"]:
+                net.add_node(
+                    edge["table"], label=edge["table"],
+                    title=f"Relationship: {edge['table']}\n{edge['source']} → {edge['target']}",
+                    color="#539BF5", size=12, shape="diamond"
+                )
+                net.add_edge(edge["source"], edge["table"], color="#539BF5", arrows="to")
+                net.add_edge(edge["table"], edge["target"], color="#539BF5", arrows="to")
+            st.caption("📌 Simulated mode — showing ontology schema from YAML. Switch to Live Spanner for real data.")
+
         # Configure physics for better layout
         net.set_options("""
         {
