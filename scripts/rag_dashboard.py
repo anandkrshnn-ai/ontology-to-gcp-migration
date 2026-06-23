@@ -802,7 +802,11 @@ with tab5:
                 nodes_res, edges_res = fetch_graph_data(config, registry_manager.spanner_db)
                 
                 if not nodes_res:
-                    st.info("🗄️ Database empty. Run ingestion from Tab 1.")
+                    st.info(
+                        "🗄️ Database empty — no graph to display.\n\n"
+                        "Go to **Tab 1 → Trigger Dataflow Bulk Load** to ingest data first."
+                    )
+                    st.stop()
                 else:
                     for entity_type, key, props_json in nodes_res:
                         props = json.loads(props_json) if props_json else {}
@@ -880,14 +884,16 @@ with tab5:
         """)
         
         # Save and render
-        html_path = "artifacts/graph.html"
-        os.makedirs("artifacts", exist_ok=True)
-        net.save_graph(html_path)
-        
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8") as f:
+            net.save_graph(f.name)
+            html_path = f.name
+            
         with open(html_path, "r", encoding="utf-8") as f:
             html_content = f.read()
             
-        components.html(html_content, height=620)
+        components.html(html_content, height=620, scrolling=False)
+        os.unlink(html_path)
         
     st.info("💡 **Impact Analysis:** The graph above highlights how multiple routings depend on the `MEM-HUB` central node. This is a visual representation of the property graph queries that power the GraphRAG serving plane.")
     
