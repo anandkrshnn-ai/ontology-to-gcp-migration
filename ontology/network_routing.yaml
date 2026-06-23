@@ -3,7 +3,7 @@ kind: ObjectType
 metadata:
   name: NetworkRouting
   domain: Air
-  version: 1.2.0
+  version: 1.3.0
   steward: network-planning-ontology-team
   description: A complete origin-to-destination routing through the network.
 spec:
@@ -24,6 +24,10 @@ spec:
     - name: zulu_day
       type: DATE
       required: true
+    - name: region
+      type: STRING(32)
+      required: false
+      description: Geographic region code (e.g. NA, EMEA, APAC)
   relationships:
     - name: has_segments
       edge: HAS_SEGMENT
@@ -39,3 +43,7 @@ spec:
       description: A routing must have at least one segment.
       expression: COUNT(has_segments) >= 1
       severity: reject
+    - id: NR-003
+      description: Region must be an approved code.
+      expression: region IN (NA, EMEA, APAC, LATAM) OR region IS NULL
+      severity: warn
