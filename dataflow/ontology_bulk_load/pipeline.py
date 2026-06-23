@@ -18,7 +18,14 @@ from validate_fn import ValidateRow
 from batch_writer import SpannerBatchWriter, AuditBatchWriter
 
 
-def load_ontology_rules(ontology_dir):
+def load_ontology_rules(ontology_dir, table_filter=None):
+    """
+    Loads validation rules from YAML files.
+
+    Incremental mode: if table_filter (set of table names) is provided,
+    only rules for those tables are loaded — skipping all other YAMLs.
+    Full mode: loads rules from every YAML in ontology_dir.
+    """
     rules_dict = {}
     if not os.path.exists(ontology_dir):
         logging.warning(f"Ontology dir {ontology_dir} not found. Skipping rule loading.")
@@ -32,11 +39,19 @@ def load_ontology_rules(ontology_dir):
                     spec = data.get("spec", {})
                     table_name = spec.get("tableName", spec.get("table"))
                     rules = spec.get("rules", [])
+
+                    # ⚡ Incremental: skip tables not in the requested set
+                    if table_filter and table_name not in table_filter:
+                        continue
+
                     if table_name and rules:
                         rules_dict[table_name] = rules
                 except Exception as e:
                     logging.error(f"Failed to parse {filename}: {e}")
-                    
+
+    loaded = list(rules_dict.keys()) if rules_dict else ["none"]
+    mode = "incremental" if table_filter else "full"
+    logging.info(f"  Rules loaded [{mode}]: {loaded}")
     return rules_dict
 
 
@@ -82,7 +97,8 @@ def run(argv=None):
     pipeline_options = PipelineOptions(pipeline_args)
     pipeline_options.view_as(SetupOptions).save_main_session = True
 
-    rules_dict = load_ontology_rules(known_args.ontology_dir)
+    table_filter = set(t.strip() for t in known_args.tables.split(','))
+    rules_dict = load_ontology_rules(known_args.ontology_dir, table_filter=table_filter)
     tables_to_load = [t.strip() for t in known_args.tables.split(',')]
 
     with beam.Pipeline(options=pipeline_options) as p:
