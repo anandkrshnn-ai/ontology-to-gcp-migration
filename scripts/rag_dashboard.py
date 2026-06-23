@@ -159,6 +159,84 @@ if os.path.exists(ontology_dir):
             with open(os.path.join(ontology_dir, f_name), 'r', encoding='utf-8') as f:
                 yamls[f_name] = f.read()
 
+st.session_state.yamls = yamls
+
+def load_ontology_graph_config(yaml_dict: dict) -> dict:
+    nodes = []
+    edges = []
+    for f_name, content in yaml_dict.items():
+        try:
+            spec = yaml.safe_load(content)
+            if not spec: continue
+            kind = spec.get("kind")
+            table = spec.get("spec", {}).get("table")
+            pk = spec.get("spec", {}).get("primaryKey", [])
+            pk = pk[0] if pk else None
+            attrs = [a["name"] for a in spec.get("spec", {}).get("attributes", [])]
+            
+            if kind == "ObjectType":
+                if table and pk:
+                    nodes.append({
+                        "view": f"v_{table}",
+                        "table": table,
+                        "key": pk,
+                        "properties": attrs,
+                    })
+            elif kind == "RelationshipType":
+                source_key = spec.get("spec", {}).get("sourceKey")
+                target_key = spec.get("spec", {}).get("targetKey")
+                if not source_key or not target_key:
+                    continue
+                if table and pk:
+                    edges.append({
+                        "view": f"v_{table}",
+                        "table": table,
+                        "key": pk,
+                        "source": source_key,
+                        "target": target_key,
+                        "properties": attrs,
+                    })
+        except Exception:
+            pass
+    return {"nodes": nodes, "edges": edges}
+
+def build_graph_queries(config: dict) -> tuple[str, str]:
+    node_parts = []
+    for node in config["nodes"]:
+        cols = ", ".join(node["properties"]) if node["properties"] else "''"
+        node_parts.append(
+            f"SELECT '{node['table']}' AS _entity_type, "
+            f"{node['key']} AS _key, "
+            f"TO_JSON_STRING(STRUCT({cols})) AS _properties "
+            f"FROM {node['view']}"
+        )
+    node_sql = "\nUNION ALL\n".join(node_parts) if node_parts else "SELECT '' AS _entity_type, '' AS _key, '' AS _properties LIMIT 0"
+
+    edge_parts = []
+    for edge in config["edges"]:
+        cols = ", ".join(edge["properties"]) if edge["properties"] else "''"
+        edge_parts.append(
+            f"SELECT '{edge['table']}' AS _rel_type, "
+            f"{edge['key']} AS _key, "
+            f"{edge['source']} AS _source, "
+            f"{edge['target']} AS _target, "
+            f"TO_JSON_STRING(STRUCT({cols})) AS _properties "
+            f"FROM {edge['view']}"
+        )
+    edge_sql = "\nUNION ALL\n".join(edge_parts) if edge_parts else "SELECT '' AS _rel_type, '' AS _key, '' AS _source, '' AS _target, '' AS _properties LIMIT 0"
+    
+    return node_sql, edge_sql
+
+COLOR_MAP = {
+    "STATION":  "#1a73e8",
+    "HUB":      "#F4A623",
+    "RAMP":     "#00bfa5",
+    "GATEWAY":  "#9C27B0",
+    "vehicle":          "#E91E8C",
+    "driver":           "#FF5722",
+    "maintenance_log":  "#607D8B",
+}
+
 # Sidebar Setup
 st.sidebar.title("🛠️ Mode & Connection")
 conn_mode = st.sidebar.radio(
@@ -684,24 +762,45 @@ with tab5:
         
         if is_live:
             try:
-                with registry_manager.spanner_db.snapshot() as snapshot1:
-                    # Query Operations
-                    nodes_res = snapshot1.execute_sql("SELECT operation_id, operation_type, location_code FROM v_operation")
-                    for row in nodes_res:
-                        op_id, op_type, loc_code = row
-                        color = "#FF6B6B" if op_type == "HUB" else ("#4ECDC4" if op_type == "STATION" else "#FFE66D")
-                        size = 30 if op_type == "HUB" else 20
-                        shape = "star" if op_type == "HUB" else "dot"
-                        net.add_node(op_id, label=op_id, color=color, shape=shape, size=size, title=f"Type: {op_type}")
-                    
-                with registry_manager.spanner_db.snapshot() as snapshot2:
-                    # Query Segments
-                    edges_res = snapshot2.execute_sql("SELECT origin_operation_id, destination_operation_id, segment_id, transport_mode FROM v_network_routing_segment")
-                    for row in edges_res:
-                        orig, dest, seg_id, mode = row
-                        color = "#1a73e8" if mode == "AIR" else "#8a99ad"
-                        width = 3 if mode == "AIR" else 1
-                        net.add_edge(orig, dest, label=f"{seg_id} ({mode})", color=color, width=width)
+                config = load_ontology_graph_config(st.session_state.yamls)
+                node_sql, edge_sql = build_graph_queries(config)
+
+                with registry_manager.spanner_db.snapshot() as snap:
+                    nodes_res = list(snap.execute_sql(node_sql))
+                    edges_res = list(snap.execute_sql(edge_sql))
+                
+                if not nodes_res:
+                    st.info("🗄️ Database empty. Run ingestion from Tab 1.")
+                else:
+                    for entity_type, key, props_json in nodes_res:
+                        props = json.loads(props_json) if props_json else {}
+                        op_type = props.get("operation_type")
+                        
+                        entity_color = (
+                            COLOR_MAP.get(op_type)
+                            or COLOR_MAP.get(entity_type)
+                            or "#888"
+                        )
+                        size = 30 if op_type == "HUB" else 15
+                        
+                        title_text = "\n".join(f"{k}: {v}" for k, v in props.items())
+                        net.add_node(
+                            key,
+                            label=key,
+                            title=title_text,
+                            color=entity_color,
+                            size=size
+                        )
+                        
+                    for rel_type, key, source, target, props_json in edges_res:
+                        props = json.loads(props_json) if props_json else {}
+                        title_text = "\n".join(f"{k}: {v}" for k, v in props.items())
+                        net.add_edge(
+                            source, target,
+                            title=title_text,
+                            color="#539BF5",
+                            arrows="to"
+                        )
             except Exception as e:
                 st.error(f"Error querying graph data from Spanner: {e}")
         else:
