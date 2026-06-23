@@ -156,7 +156,7 @@ ontology_dir = "ontology"
 yamls = {}
 if os.path.exists(ontology_dir):
     for f_name in os.listdir(ontology_dir):
-        if f_name.endswith(('.yaml', '.yml')):
+        if f_name.endswith(('.yaml', '.yml')) and f_name != "ontology_graph.yaml":
             with open(os.path.join(ontology_dir, f_name), 'r', encoding='utf-8') as f:
                 yamls[f_name] = f.read()
 
