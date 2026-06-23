@@ -200,32 +200,32 @@ def load_ontology_graph_config(yaml_dict: dict) -> dict:
             pass
     return {"nodes": nodes, "edges": edges}
 
-def build_graph_queries(config: dict) -> tuple[str, str]:
-    node_parts = []
+def fetch_graph_data(config: dict, spanner_db) -> tuple[list, list]:
+    nodes_res = []
     for node in config["nodes"]:
-        cols = ", ".join(node["properties"]) if node["properties"] else "''"
-        node_parts.append(
-            f"SELECT '{node['table']}' AS _entity_type, "
-            f"{node['key']} AS _key, "
-            f"TO_JSON_STRING(STRUCT({cols})) AS _properties "
-            f"FROM {node['view']}"
-        )
-    node_sql = "\nUNION ALL\n".join(node_parts) if node_parts else "SELECT '' AS _entity_type, '' AS _key, '' AS _properties LIMIT 0"
+        cols = ", ".join(node["properties"]) if node["properties"] else "1"
+        query = f"SELECT '{node['table']}', CAST({node['key']} AS STRING), {cols} FROM {node['view']}"
+        with spanner_db.snapshot() as snap:
+            for row in snap.execute_sql(query):
+                entity_type = row[0]
+                key = str(row[1]) if row[1] is not None else ""
+                props = dict(zip(node["properties"], row[2:])) if node["properties"] else {}
+                nodes_res.append((entity_type, key, json.dumps(props)))
 
-    edge_parts = []
+    edges_res = []
     for edge in config["edges"]:
-        cols = ", ".join(edge["properties"]) if edge["properties"] else "''"
-        edge_parts.append(
-            f"SELECT '{edge['table']}' AS _rel_type, "
-            f"{edge['key']} AS _key, "
-            f"{edge['source']} AS _source, "
-            f"{edge['target']} AS _target, "
-            f"TO_JSON_STRING(STRUCT({cols})) AS _properties "
-            f"FROM {edge['view']}"
-        )
-    edge_sql = "\nUNION ALL\n".join(edge_parts) if edge_parts else "SELECT '' AS _rel_type, '' AS _key, '' AS _source, '' AS _target, '' AS _properties LIMIT 0"
-    
-    return node_sql, edge_sql
+        cols = ", ".join(edge["properties"]) if edge["properties"] else "1"
+        query = f"SELECT '{edge['table']}', CAST({edge['key']} AS STRING), CAST({edge['source']} AS STRING), CAST({edge['target']} AS STRING), {cols} FROM {edge['view']}"
+        with spanner_db.snapshot() as snap:
+            for row in snap.execute_sql(query):
+                rel_type = row[0]
+                key = str(row[1]) if row[1] is not None else ""
+                source = str(row[2]) if row[2] is not None else ""
+                target = str(row[3]) if row[3] is not None else ""
+                props = dict(zip(edge["properties"], row[4:])) if edge["properties"] else {}
+                edges_res.append((rel_type, key, source, target, json.dumps(props)))
+                
+    return nodes_res, edges_res
 
 COLOR_MAP = {
     "STATION":  "#1a73e8",
@@ -772,13 +772,7 @@ with tab5:
                 config["nodes"] = [n for n in config["nodes"] if n["view"] in existing_views]
                 config["edges"] = [e for e in config["edges"] if e["view"] in existing_views]
                 
-                node_sql, edge_sql = build_graph_queries(config)
-                
-                with registry_manager.spanner_db.snapshot() as snap:
-                    nodes_res = list(snap.execute_sql(node_sql))
-                    
-                with registry_manager.spanner_db.snapshot() as snap:
-                    edges_res = list(snap.execute_sql(edge_sql))
+                nodes_res, edges_res = fetch_graph_data(config, registry_manager.spanner_db)
                 
                 if not nodes_res:
                     st.info("🗄️ Database empty. Run ingestion from Tab 1.")
