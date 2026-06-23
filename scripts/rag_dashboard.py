@@ -763,9 +763,16 @@ with tab5:
         if is_live:
             try:
                 config = load_ontology_graph_config(st.session_state.yamls)
-                node_sql, edge_sql = build_graph_queries(config)
 
                 with registry_manager.spanner_db.snapshot() as snap:
+                    # Guard against schema drift: only query views that actually exist in Spanner
+                    existing_tables_res = snap.execute_sql("SELECT table_name FROM information_schema.tables")
+                    existing_views = {row[0] for row in existing_tables_res}
+                    
+                    config["nodes"] = [n for n in config["nodes"] if n["view"] in existing_views]
+                    config["edges"] = [e for e in config["edges"] if e["view"] in existing_views]
+                    
+                    node_sql, edge_sql = build_graph_queries(config)
                     nodes_res = list(snap.execute_sql(node_sql))
                     edges_res = list(snap.execute_sql(edge_sql))
                 
