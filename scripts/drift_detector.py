@@ -41,15 +41,15 @@ def load_ontology_schemas(ontology_dir):
                             for prop_name, prop_def in spec["properties"].items():
                                 columns[prop_name] = prop_def.get("type", "STRING(MAX)").upper()
                                 
-                    # Handle RelationshipType
+                    # Handle RelationshipType — read actual attributes just like ObjectType
                     elif data.get("kind") == "RelationshipType":
-                        # Usually relationship edges have predictable columns or defined ones
-                        columns["source_id"] = "STRING(MAX)"
-                        columns["target_id"] = "STRING(MAX)"
-                        # If properties are defined
-                        if "properties" in spec:
+                        if "attributes" in spec:
+                            for attr in spec.get("attributes", []):
+                                columns[attr["name"]] = attr.get("type", "STRING(MAX)").upper()
+                        elif "properties" in spec:
                             for prop_name, prop_def in spec["properties"].items():
                                 columns[prop_name] = prop_def.get("type", "STRING(MAX)").upper()
+                        # sourceKey/targetKey are graph metadata — NOT physical columns, ignore them
 
                     if columns:
                         schemas[table_name] = columns
