@@ -1,11 +1,12 @@
+import os
+os.environ["GOOGLE_CLOUD_DISABLE_GRPC_METRICS"] = "true"
+
 import streamlit as st
 import json
-import os
 import sys
 import yaml
 import numpy as np
 from pyvis.network import Network
-import streamlit.components.v1 as components
 
 # Adjust sys.path to resolve local packages in the workspace root
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -892,7 +893,7 @@ with tab5:
         with open(html_path, "r", encoding="utf-8") as f:
             html_content = f.read()
             
-        components.html(html_content, height=620, scrolling=False)
+        st.components.v1.html(html_content, height=620, scrolling=False)
         os.unlink(html_path)
         
     st.info("💡 **Impact Analysis:** The graph above highlights how multiple routings depend on the `MEM-HUB` central node. This is a visual representation of the property graph queries that power the GraphRAG serving plane.")
