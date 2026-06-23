@@ -55,15 +55,31 @@ steps:
         cd terraform/envs/dev
         terraform plan -var-file="terraform.tfvars" -input=false
 
-  # 6. Schema Drift Check (fails build if DB has out-of-band changes)
-  - name: 'python:3.11-slim'
-    id: 'drift-check'
+  # 6. Detect Changed Files for Incremental Drift Check
+  - id: 'detect-changed-files'
+    name: 'gcr.io/cloud-builders/git'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        git diff --name-only HEAD~1 HEAD -- ontology/ \
+          | grep '\.yaml$' > /workspace/changed_files.txt || true
+        echo "Changed ontology files:"
+        cat /workspace/changed_files.txt
+
+  # 7. Schema Drift Check (fails build if DB has out-of-band changes)
+  - id: 'drift-check'
+    name: 'python:3.11-slim'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
         pip install -r requirements.txt
-        python scripts/drift_detector.py --ontology_dir=ontology --instance=ontology-demo --database=ontology-db
+        python scripts/drift_detector.py \
+          --ontology_dir=ontology \
+          --instance=ontology-demo \
+          --database=ontology-db \
+          --changed-files=/workspace/changed_files.txt
 
 options:
   logging: CLOUD_LOGGING_ONLY
