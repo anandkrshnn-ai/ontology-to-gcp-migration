@@ -27,14 +27,14 @@ spec:
       type: STRING(64)
       required: false
     - name: transport_mode
-      type: STRING(64)
+      type: STRING(16)
       required: false
     - name: weight
-      type: FLOAT64
+      type: NUMERIC
       required: false
     - name: pieces
       type: INT64
       required: false
     - name: zulu_day
-      type: STRING(64)
+      type: DATE
       required: false
