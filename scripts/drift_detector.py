@@ -217,7 +217,46 @@ def main():
             print(json.dumps(report["pending_evolution"], indent=2))
             if args.apply:
                 print("Applying schema evolution DDL to Spanner...")
-                print("Schema evolution applied successfully.")
+                spanner_client = spanner.Client()
+                instance = spanner_client.instance(args.instance)
+                database = instance.database(args.database)
+                
+                statements = []
+                
+                # 1. ALTER TABLE for new columns
+                for table, cols in report["pending_evolution"]["columns_to_add"].items():
+                    for col in cols:
+                        col_type = canonical[table][col]
+                        statements.append(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+                
+                # 2. CREATE TABLE for new tables
+                if report["pending_evolution"]["tables_to_create"]:
+                    from scripts.graph_compiler import GraphCompiler
+                    compiler = GraphCompiler("ADDITIVE", {})
+                    for f in os.listdir(args.ontology_dir):
+                        if f.endswith(".yaml") or f.endswith(".yml"):
+                            with open(os.path.join(args.ontology_dir, f), 'r', encoding='utf-8') as file:
+                                try:
+                                    data = yaml.safe_load(file)
+                                    spec = data.get("spec", {})
+                                    table_name = spec.get("tableName", spec.get("table"))
+                                    if table_name in report["pending_evolution"]["tables_to_create"]:
+                                        ddl = compiler.generate_table_ddl(data)
+                                        if ddl:
+                                            statements.append(ddl)
+                                except Exception as e:
+                                    print(f"Error parsing {f} for DDL: {e}")
+                
+                if statements:
+                    print(f"Executing {len(statements)} DDL statement(s)...")
+                    for stmt in statements:
+                        print(f" -> {stmt}")
+                    operation = database.update_ddl(statements)
+                    operation.result() # Wait for completion
+                    print("Schema evolution applied successfully.")
+                else:
+                    print("No DDL statements generated.")
+                    
             sys.exit(0)
 
     print("\n✅ NO DRIFT DETECTED. Live Spanner schema matches canonical YAML specifications.")
