@@ -3,7 +3,7 @@ kind: ObjectType
 metadata:
   name: Shipment
   domain: Logistics
-  version: 1.0.0
+  version: 2.0.0
   steward: logistics-ontology-team
   description: A shipment of goods moving through the logistics network.
 spec:
@@ -31,6 +31,7 @@ spec:
     - name: actual_arrival
       type: TIMESTAMP
       required: false
+      
   rules:
     - id: SHP-001
       description: Origin and destination must be different.
