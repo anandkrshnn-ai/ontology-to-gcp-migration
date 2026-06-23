@@ -200,6 +200,19 @@ def load_ontology_graph_config(yaml_dict: dict) -> dict:
             pass
     return {"nodes": nodes, "edges": edges}
 
+def safe_json(props: dict) -> dict:
+    import datetime
+    import decimal
+    result = {}
+    for k, v in props.items():
+        if isinstance(v, (datetime.date, datetime.datetime)):
+            result[k] = v.isoformat()
+        elif isinstance(v, decimal.Decimal):
+            result[k] = float(v)
+        else:
+            result[k] = v
+    return result
+
 def fetch_graph_data(config: dict, spanner_db) -> tuple[list, list]:
     nodes_res = []
     for node in config["nodes"]:
@@ -210,7 +223,7 @@ def fetch_graph_data(config: dict, spanner_db) -> tuple[list, list]:
                 entity_type = row[0]
                 key = str(row[1]) if row[1] is not None else ""
                 props = dict(zip(node["properties"], row[2:])) if node["properties"] else {}
-                nodes_res.append((entity_type, key, json.dumps(props)))
+                nodes_res.append((entity_type, key, json.dumps(safe_json(props))))
 
     edges_res = []
     for edge in config["edges"]:
@@ -223,7 +236,7 @@ def fetch_graph_data(config: dict, spanner_db) -> tuple[list, list]:
                 source = str(row[2]) if row[2] is not None else ""
                 target = str(row[3]) if row[3] is not None else ""
                 props = dict(zip(edge["properties"], row[4:])) if edge["properties"] else {}
-                edges_res.append((rel_type, key, source, target, json.dumps(props)))
+                edges_res.append((rel_type, key, source, target, json.dumps(safe_json(props))))
                 
     return nodes_res, edges_res
 
