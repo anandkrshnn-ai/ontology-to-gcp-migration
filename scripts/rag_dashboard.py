@@ -165,54 +165,40 @@ st.session_state.yamls = yamls
 def load_ontology_graph_config(yaml_dict: dict) -> dict:
     nodes = []
     edges = []
-    
-    table_to_attrs = {}
-    for f_name, content in yaml_dict.items():
-        try:
-            spec = yaml.safe_load(content)
-            if not spec: continue
-            if spec.get("kind") == "ObjectType":
-                table = spec.get("spec", {}).get("table")
-                attrs = [a["name"] for a in spec.get("spec", {}).get("attributes", [])]
-                if table:
-                    table_to_attrs[table] = attrs
-        except Exception:
-            pass
-
     for f_name, content in yaml_dict.items():
         try:
             spec = yaml.safe_load(content)
             if not spec: continue
             kind = spec.get("kind")
+            table = spec.get("spec", {}).get("table")
+            pk = spec.get("spec", {}).get("primaryKey", [])
+            pk = pk[0] if pk else None
+            attrs = [a["name"] for a in spec.get("spec", {}).get("attributes", [])]
             
-            if kind == "PropertyGraph":
-                for n in spec.get("spec", {}).get("nodes", []):
-                    table = n.get("tableName")
-                    pk = n.get("key")
-                    if table and pk:
-                        nodes.append({
-                            "view": f"v_{table}",
-                            "table": table,
-                            "key": pk,
-                            "properties": table_to_attrs.get(table, []),
-                        })
-                for e in spec.get("spec", {}).get("edges", []):
-                    table = e.get("tableName")
-                    pk = e.get("key")
-                    source_col = e.get("source", {}).get("foreignKey")
-                    target_col = e.get("target", {}).get("foreignKey")
-                    if table and pk and source_col and target_col:
-                        edges.append({
-                            "view": f"v_{table}",
-                            "table": e.get("label", table),
-                            "key": pk,
-                            "source": source_col,
-                            "target": target_col,
-                            "properties": table_to_attrs.get(table, []),
-                        })
+            if kind == "ObjectType":
+                if table and pk:
+                    nodes.append({
+                        "view": f"v_{table}",
+                        "table": table,
+                        "key": pk,
+                        "properties": attrs,
+                    })
+            elif kind == "RelationshipType":
+                source_key = spec.get("spec", {}).get("sourceKey")
+                target_key = spec.get("spec", {}).get("targetKey")
+                if not source_key or not target_key:
+                    continue
+                if table and pk:
+                    edges.append({
+                        "view": f"v_{table}",
+                        "table": table,
+                        "key": pk,
+                        "source": source_key,
+                        "target": target_key,
+                        "properties": attrs,
+                    })
         except Exception:
             pass
-            
     return {"nodes": nodes, "edges": edges}
 
 def safe_json(props: dict) -> dict:

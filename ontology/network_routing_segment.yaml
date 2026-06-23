@@ -1,14 +1,10 @@
 apiVersion: routing.ontology/v1
-kind: ObjectType
-metadata:
-  name: NetworkRoutingSegment
-  domain: Air
-  version: 1.2.0
-  steward: network-planning-ontology-team
-  description: A single leg of a network routing.
+kind: RelationshipType
 spec:
   table: network_routing_segment
   primaryKey: [segment_id]
+  sourceKey: origin_operation_id
+  targetKey: destination_operation_id
   attributes:
     - name: segment_id
       type: STRING(64)
