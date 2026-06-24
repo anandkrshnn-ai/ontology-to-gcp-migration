@@ -258,7 +258,8 @@ def main():
                     print(f"Executing {len(statements)} DDL statement(s)...")
                     for stmt in statements:
                         print(f" -> {stmt}")
-                    operation = database.update_ddl(statements)
+                    clean_statements = [s.rstrip().rstrip(';') for s in statements if s.strip()]
+                    operation = database.update_ddl(clean_statements)
                     operation.result() # Wait for completion
                     print("Schema evolution applied successfully.")
                 else:
