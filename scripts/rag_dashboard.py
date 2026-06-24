@@ -512,6 +512,50 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🌐 Graph Explorer"
 ])
 
+def build_view_ddl(config: dict) -> list[str]:
+    """Generate CREATE OR REPLACE VIEW statements for each node/edge table."""
+    statements = []
+    seen = set()
+    
+    # Node views: v_<table>
+    for node in config.get("nodes", []):
+        table = node["table"]
+        view = node["view"]  # e.g. v_aircraft
+        if view in seen:
+            continue
+        seen.add(view)
+        
+        # key + properties
+        cols = [node["key"]] + node["properties"]
+        col_list = ", ".join(cols)
+        statements.append(
+            f"CREATE OR REPLACE VIEW `{view}` SQL SECURITY INVOKER "
+            f"AS SELECT {col_list} FROM `{table}`"
+        )
+    
+    # Edge views: v_<relationship_table>
+    for edge in config.get("edges", []):
+        table = edge["table"]
+        view = edge["view"]
+        if view in seen:
+            continue
+        seen.add(view)
+        
+        cols = [edge["key"], edge["source"], edge["target"]] + edge.get("properties", [])
+        # deduplicate columns while preserving order
+        seen_cols = []
+        for c in cols:
+            if c not in seen_cols:
+                seen_cols.append(c)
+        
+        col_list = ", ".join(seen_cols)
+        statements.append(
+            f"CREATE OR REPLACE VIEW `{view}` SQL SECURITY INVOKER "
+            f"AS SELECT {col_list} FROM `{table}`"
+        )
+    
+    return statements
+
 # TAB 1: Control Plane - FIX
 with tab1:
     st.markdown("### Structural Ontology Registry & Compilation")
@@ -575,7 +619,7 @@ with tab1:
             # LIVE MODE
             st.markdown("##### Live GCP Schema Operations")
             
-            col_actions = st.columns(2)
+            col_actions = st.columns(3)
             with col_actions[0]:
                 if st.button("Initialize Registry Metadata Tables"):
                     with st.spinner("Deploying base schema registry tables..."):
@@ -651,6 +695,24 @@ with tab1:
                                     st.warning("No new DDL actions compiled.")
                         except Exception as e:
                             st.error(f"Error executing schema apply: {e}")
+                            
+            with col_actions[2]:
+                if st.button("Create Ontology Views"):
+                    with st.spinner("Creating views in Spanner..."):
+                        try:
+                            config = load_ontology_graph_config(st.session_state.yamls)
+                            view_ddls = build_view_ddl(config)
+                            if view_ddls:
+                                st.info(f"Creating {len(view_ddls)} views...")
+                                operation = registry_manager.spanner_db.update_ddl(view_ddls)
+                                operation.result()
+                                st.success(f"✅ {len(view_ddls)} views created successfully!")
+                                for ddl in view_ddls:
+                                    st.caption(f"`{ddl[:80]}...`")
+                            else:
+                                st.warning("No views to create — check your YAML ontology files.")
+                        except Exception as e:
+                            st.error(f"Failed to create views: {e}")
                             
             st.markdown("---")
             st.markdown("##### Live Data Ingestion")
