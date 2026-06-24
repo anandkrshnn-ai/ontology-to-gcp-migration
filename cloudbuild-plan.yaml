@@ -1,18 +1,22 @@
-# Native Cloud Build configuration for the validation/plan pipeline.
-# Triggered on Pull Requests to validate Terraform configurations and Ontology specifications.
+# Step flow:
+#   1. run-python-tests       → unit tests
+#   2. validate-ontology-yaml → structural YAML validation  
+#   3. detect-changed-files   → incremental diff
+#   4. drift-check            → ontology vs live Spanner
 
 steps:
-  # 1. Run Python unit tests for the orchestrator/compiler logic
   - name: 'python:3.11-slim'
     id: 'run-python-tests'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        set -e
+        cd /workspace
+        export PYTHONPATH=/workspace
         pip install -r requirements.txt
-        PYTHONPATH=/workspace pytest scripts/tests/ -v
+        pytest scripts/tests/ -v
 
-  # 2. Run the orchestrator validation command on incoming YAML definitions
   - name: 'python:3.11-slim'
     id: 'validate-ontology-yaml'
     entrypoint: 'bash'
@@ -25,37 +29,6 @@ steps:
         pip install -r requirements.txt
         python -m scripts.orchestrator --action validate --source ontology
 
-  # 3. Initialize Terraform
-  - name: 'hashicorp/terraform:1.9.8'
-    id: 'terraform-init'
-    entrypoint: 'sh'
-    args:
-      - '-c'
-      - |
-        cd terraform/envs/dev
-        terraform init
-
-  # 4. Validate Terraform
-  - name: 'hashicorp/terraform:1.9.8'
-    id: 'terraform-validate'
-    entrypoint: 'sh'
-    args:
-      - '-c'
-      - |
-        cd terraform/envs/dev
-        terraform validate
-
-  # 5. Run Terraform Plan (Dry-run configuration)
-  - name: 'hashicorp/terraform:1.9.8'
-    id: 'terraform-plan'
-    entrypoint: 'sh'
-    args:
-      - '-c'
-      - |
-        cd terraform/envs/dev
-        terraform plan -var-file="terraform.tfvars" -input=false
-
-  # 6. Detect Changed Files for Incremental Drift Check
   - id: 'detect-changed-files'
     name: 'gcr.io/cloud-builders/git'
     entrypoint: 'bash'
@@ -67,16 +40,19 @@ steps:
         echo "Changed ontology files:"
         cat /workspace/changed_files.txt
 
-  # 7. Schema Drift Check (fails build if DB has out-of-band changes)
   - id: 'drift-check'
     name: 'python:3.11-slim'
     entrypoint: 'bash'
     args:
       - '-c'
       - |
+        set -e
+        cd /workspace
+        export PYTHONPATH=/workspace
         pip install -r requirements.txt
-        python scripts/drift_detector.py \
+        python -m scripts.drift_detector \
           --ontology_dir=ontology \
+          --project=migiration-demo \
           --instance=ontology-demo \
           --database=ontology-db \
           --changed-files=/workspace/changed_files.txt

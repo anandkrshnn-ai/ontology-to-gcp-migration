@@ -1,16 +1,10 @@
-# Native Cloud Build configuration for the deployment/apply pipeline.
-# Gated by manual approval in Cloud Build before execution.
-#
 # Step flow:
 #   1. validate-ontology      → checks all YAML files are structurally valid
 #   2. compile-spanner-ddl    → generates DDL from YAML
 #   3. detect-schema-drift    → separates pending evolution from true drift
 #   4. apply-schema-evolution → applies only safe additive DDL to Spanner
-#   5. terraform-apply        → ensures infra matches desired state
-#   6-9. build/push Dataflow  → packages worker image with commit SHA + latest
 
 steps:
-  # 1. Validate Ontology
   - name: 'python:3.11-slim'
     id: 'validate-ontology'
     entrypoint: 'bash'
@@ -25,7 +19,6 @@ steps:
         python -m scripts.orchestrator --action validate --source ontology
         echo "✅ Ontology validation passed."
 
-  # 2. Compile Spanner DDL
   - name: 'python:3.11-slim'
     id: 'compile-spanner-ddl'
     entrypoint: 'bash'
@@ -40,9 +33,6 @@ steps:
         python -m scripts.graph_compiler
         echo "✅ DDL compilation complete."
 
-  # 3. Detect Schema Drift
-  # - Pending evolution (new tables/columns)  → exits 0, prints plan, continues
-  # - True drift (type mismatches, drops)      → exits 1, BLOCKS pipeline
   - name: 'python:3.11-slim'
     id: 'detect-schema-drift'
     entrypoint: 'bash'
@@ -61,9 +51,6 @@ steps:
           --database=ontology-db
         echo "✅ Drift detection complete."
 
-  # 4. Apply Additive Schema Evolution to Spanner
-  # Only runs if Step 3 exited 0 (no breaking drift).
-  # Executes CREATE TABLE / ALTER TABLE ADD COLUMN for pending evolution.
   - name: 'python:3.11-slim'
     id: 'apply-schema-evolution'
     entrypoint: 'bash'
@@ -82,19 +69,6 @@ steps:
           --instance=ontology-demo \
           --database=ontology-db
         echo "✅ Schema evolution applied to Spanner."
-
-  # 5. Terraform Apply
-  # - name: 'hashicorp/terraform:1.9.8'
-  #   id: 'terraform-apply'
-  #   entrypoint: 'sh'
-  #   args:
-  #     - '-c'
-  #     - |
-  #       echo "=== Step 5: Terraform apply ==="
-  #       cd terraform/envs/dev
-  #       terraform init -input=false
-  #       terraform apply -auto-approve -var-file="terraform.tfvars" -input=false
-  #       echo "✅ Terraform apply complete."
 
 options:
   logging: CLOUD_LOGGING_ONLY
