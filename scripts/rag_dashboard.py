@@ -289,13 +289,14 @@ def fetch_graph_data(config: dict, spanner_db) -> tuple[list, list]:
 
 
 COLOR_MAP = {
-    "STATION":  "#1a73e8",
-    "HUB":      "#F4A623",
-    "RAMP":     "#00bfa5",
-    "GATEWAY":  "#9C27B0",
-    "vehicle":          "#E91E8C",
-    "driver":           "#FF5722",
-    "maintenance_log":  "#607D8B",
+    "HUB": "#F59E0B",      # Gold - Central
+    "STATION": "#3B82F6",
+    "RAMP": "#10B981",
+    "GATEWAY": "#8B5CF6",
+    "vehicle": "#EC4899",
+    "driver": "#F97316",
+    "maintenance_log": "#64748B",
+    "network_routing": "#22D3EE",
 }
 
 # Sidebar Setup
@@ -838,6 +839,18 @@ with tab5:
         _prog_bar.progress(min(frac, 0.95), text=label or "Loading...")
 
     with st.spinner("Querying Spanner & rendering graph..."):
+        # Legend
+        with st.expander("📊 Legend & Filters", expanded=True):
+            cols = st.columns(4)
+            with cols[0]:
+                st.markdown("**🟡 HUB** - Critical Nodes")
+            with cols[1]:
+                st.markdown("**🔵 ROUTE** - Network Routing")
+            with cols[2]:
+                st.markdown("**🟢 STATION/RAMP** - Operational")
+            with cols[3]:
+                st.markdown("**🟣 EDGE** - Relationships")
+
         # Build network graph
         net = Network(height="600px", width="100%", directed=True, bgcolor="#0d0f14", font_color="#e0e0e0")
         
@@ -867,47 +880,57 @@ with tab5:
                     added_node_ids = set()
                     for entity_type, key, props_json in nodes_res:
                         props = json.loads(props_json) if props_json else {}
-                        op_type = props.get("operation_type")
                         
-                        entity_color = (
-                            COLOR_MAP.get(op_type)
-                            or COLOR_MAP.get(entity_type)
-                            or "#888"
-                        )
-                        size = 30 if op_type == "HUB" else 15
+                        display_label = str(props.get("location_code") or props.get("name") or key)
+                        if len(display_label) > 12:
+                            display_label = display_label[:12] + "..."
                         
-                        if props.get("location_code") == "MEM-HUB":
-                            size = 40
-                            entity_color = "#F59E0B"
-                        elif op_type == "HUB":
-                            size = 30
-                            
-                        node_label = str(props.get("location_code") or props.get("operation_id") or key)
-                        title_lines = [
-                            f"type: {entity_type}",
-                            f"id: {key}",
-                        ] + [f"{k}: {v}" for k, v in props.items()]
-                        title_text = "\n".join(title_lines)
+                        # Visual hierarchy
+                        color = COLOR_MAP.get(entity_type.lower()) or COLOR_MAP.get(props.get("operation_type")) or "#94A3B8"
+                        size = 22
+                        if "HUB" in str(entity_type).upper() or props.get("location_code") == "MEM-HUB":
+                            size = 48
+                            color = "#F59E0B"
+                        elif "ROUTE" in str(entity_type).upper():
+                            size = 32
+                        
+                        # Super rich tooltip
+                        tooltip = f"""
+                        <b>{display_label}</b><br>
+                        Type: {entity_type}<br>
+                        ID: {key}<br>
+                        """
+                        for k, v in list(props.items())[:10]:
+                            if v not in (None, "", "null"):
+                                tooltip += f"{k.replace('_', ' ').title()}: {v}<br>"
                         
                         net.add_node(
                             key,
-                            label=node_label,
-                            title=title_text,
-                            color=entity_color,
-                            size=size
+                            label=display_label,
+                            title=tooltip,
+                            color=color,
+                            size=size,
+                            font={"size": 15, "color": "#E2E8F0", "face": "arial"},
+                            shadow=True
                         )
                         added_node_ids.add(key)
                         
                     for rel_type, key, source, target, props_json in edges_res:
+                        if source not in added_node_ids or target not in added_node_ids:
+                            continue  # Skip broken edges
+                        
                         props = json.loads(props_json) if props_json else {}
-                        title_text = "\n".join(f"{k}: {v}" for k, v in props.items())
-                        if source in added_node_ids and target in added_node_ids:
-                            net.add_edge(
-                                source, target,
-                                title=title_text,
-                                color="#539BF5",
-                                arrows="to"
-                            )
+                        tooltip = f"<b>{rel_type}</b><br>ID: {key}<br>" + \
+                                  "<br>".join(f"{k}: {v}" for k, v in props.items() if v)
+                        
+                        net.add_edge(
+                            source, target,
+                            title=tooltip,
+                            color="#60A5FA",
+                            arrows="to",
+                            width=2.8,
+                            smooth={"type": "curvedCW", "roundness": 0.3}
+                        )
             except Exception as e:
                 st.warning(f"⚠️ Live Spanner unavailable: {e}\n\nFalling back to simulated ontology schema graph.")
                 # ── FALLBACK: render simulated graph from YAML ──────────────────
