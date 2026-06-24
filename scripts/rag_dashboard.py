@@ -216,67 +216,66 @@ def safe_json(props: dict) -> dict:
             result[k] = v
     return result
 
-def fetch_graph_data(config: dict, spanner_db) -> tuple[list, list]:
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_graph_data(config: dict, _spanner_db, _progress_cb=None) -> tuple[list, list]:
+    """Fetch node and edge data from Spanner.
+    Uses a single snapshot for all queries (fewer round-trips).
+    Caps each table at 200 rows to keep the graph fast.
+    Results are cached for 5 minutes (ttl=300).
+    """
+    ROW_LIMIT = 200
+    all_items = [("node", n) for n in config["nodes"]] + [("edge", e) for e in config["edges"]]
+    total = len(all_items)
+
     nodes_res = []
-    for node in config["nodes"]:
-        cols = ", ".join(node["properties"]) if node["properties"] else "1"
-        query = f"SELECT '{node['table']}', CAST({node['key']} AS STRING), {cols} FROM {node['view']}"
-        try:
-            with spanner_db.snapshot() as snap:
-                results = snap.execute_sql(query)
-                for row in results:
-                    # Robust row handling - Spanner rows can be Row objects, dicts, or plain lists
-                    if hasattr(row, '_asdict'):
-                        row_values = list(row)
-                    elif isinstance(row, dict):
-                        row_values = list(row.values())
-                    else:
-                        row_values = list(row)
-
-                    entity_type = str(row_values[0])
-                    key = str(row_values[1]) if len(row_values) > 1 and row_values[1] is not None else ""
-
-                    props = {}
-                    if node["properties"] and len(row_values) > 2:
-                        for i, col_name in enumerate(node["properties"]):
-                            if 2 + i < len(row_values):
-                                props[col_name] = row_values[2 + i]
-
-                    nodes_res.append((entity_type, key, json.dumps(safe_json(props))))
-        except Exception as e:
-            st.warning(f"Failed to fetch nodes for {node['table']}: {e}")
-            continue
-
     edges_res = []
-    for edge in config["edges"]:
-        cols = ", ".join(edge["properties"]) if edge["properties"] else "1"
-        query = f"SELECT '{edge['table']}', CAST({edge['key']} AS STRING), CAST({edge['source']} AS STRING), CAST({edge['target']} AS STRING), {cols} FROM {edge['view']}"
-        try:
-            with spanner_db.snapshot() as snap:
-                results = snap.execute_sql(query)
-                for row in results:
-                    if hasattr(row, '_asdict'):
-                        row_values = list(row)
-                    elif isinstance(row, dict):
-                        row_values = list(row.values())
+
+    try:
+        with _spanner_db.snapshot() as snap:
+            for idx, (kind, item) in enumerate(all_items):
+                if _progress_cb:
+                    _progress_cb(idx / total, f"Loading {item.get('table', '')}...")
+                try:
+                    if kind == "node":
+                        cols = ", ".join(item["properties"]) if item["properties"] else "''"
+                        query = (
+                            f"SELECT '{item['table']}', CAST({item['key']} AS STRING), {cols} "
+                            f"FROM {item['view']} LIMIT {ROW_LIMIT}"
+                        )
+                        for row in snap.execute_sql(query):
+                            row_values = list(row) if not isinstance(row, dict) else list(row.values())
+                            entity_type = str(row_values[0])
+                            key = str(row_values[1]) if len(row_values) > 1 and row_values[1] is not None else ""
+                            props = {}
+                            if item["properties"] and len(row_values) > 2:
+                                for i, col_name in enumerate(item["properties"]):
+                                    if 2 + i < len(row_values):
+                                        props[col_name] = row_values[2 + i]
+                            nodes_res.append((entity_type, key, json.dumps(safe_json(props))))
                     else:
-                        row_values = list(row)
-
-                    rel_type = str(row_values[0])
-                    key = str(row_values[1]) if len(row_values) > 1 else ""
-                    source = str(row_values[2]) if len(row_values) > 2 else ""
-                    target = str(row_values[3]) if len(row_values) > 3 else ""
-
-                    props = {}
-                    if edge["properties"] and len(row_values) > 4:
-                        for i, col_name in enumerate(edge["properties"]):
-                            if 4 + i < len(row_values):
-                                props[col_name] = row_values[4 + i]
-
-                    edges_res.append((rel_type, key, source, target, json.dumps(safe_json(props))))
-        except Exception as e:
-            st.warning(f"Failed to fetch edges for {edge['table']}: {e}")
-            continue
+                        cols = ", ".join(item["properties"]) if item["properties"] else "''"
+                        query = (
+                            f"SELECT '{item['table']}', CAST({item['key']} AS STRING), "
+                            f"CAST({item['source']} AS STRING), CAST({item['target']} AS STRING), {cols} "
+                            f"FROM {item['view']} LIMIT {ROW_LIMIT}"
+                        )
+                        for row in snap.execute_sql(query):
+                            row_values = list(row) if not isinstance(row, dict) else list(row.values())
+                            rel_type = str(row_values[0])
+                            key = str(row_values[1]) if len(row_values) > 1 else ""
+                            source = str(row_values[2]) if len(row_values) > 2 else ""
+                            target = str(row_values[3]) if len(row_values) > 3 else ""
+                            props = {}
+                            if item["properties"] and len(row_values) > 4:
+                                for i, col_name in enumerate(item["properties"]):
+                                    if 4 + i < len(row_values):
+                                        props[col_name] = row_values[4 + i]
+                            edges_res.append((rel_type, key, source, target, json.dumps(safe_json(props))))
+                except Exception as e:
+                    st.warning(f"⚠️ Skipped {item.get('table', '?')}: {e}")
+                    continue
+    except Exception as e:
+        raise e  # Let caller handle top-level connection errors
 
     return nodes_res, edges_res
 
@@ -824,13 +823,20 @@ with tab5:
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Ontology Routing Dependencies")
     
-    with st.spinner("Rendering Graph..."):
+    # Progress bar for better UX while Spanner loads
+    _prog_bar = st.progress(0, text="Initialising graph...")
+
+    def _update_progress(frac: float, label: str = ""):
+        _prog_bar.progress(min(frac, 0.95), text=label or "Loading...")
+
+    with st.spinner("Querying Spanner & rendering graph..."):
         # Build network graph
         net = Network(height="600px", width="100%", directed=True, bgcolor="#0d0f14", font_color="#e0e0e0")
         
         if is_live:
             try:
                 config = load_ontology_graph_config(st.session_state.yamls)
+                _update_progress(0.1, "Checking existing Spanner views...")
 
                 with registry_manager.spanner_db.snapshot() as snap:
                     # Guard against schema drift: only query views that actually exist in Spanner
@@ -839,8 +845,9 @@ with tab5:
                     
                 config["nodes"] = [n for n in config["nodes"] if n["view"] in existing_views]
                 config["edges"] = [e for e in config["edges"] if e["view"] in existing_views]
-                
-                nodes_res, edges_res = fetch_graph_data(config, registry_manager.spanner_db)
+                _update_progress(0.2, "Fetching graph data from Spanner...")
+
+                nodes_res, edges_res = fetch_graph_data(config, registry_manager.spanner_db, _update_progress)
                 
                 if not nodes_res:
                     st.info(
