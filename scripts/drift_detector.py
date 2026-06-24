@@ -64,13 +64,16 @@ def load_ontology_schemas(ontology_dir, changed_files=None):
     return schemas
 
 
-def get_live_spanner_schema(instance_id, database_id, table_filter=None):
+def get_live_spanner_schema(project_id, instance_id, database_id, table_filter=None):
     """
     Incremental mode: table_filter limits Spanner query to only relevant tables.
     Full mode: fetches all tables.
     Returns: dict {table_name: {column_name: spanner_type}}
     """
-    spanner_client = spanner.Client()
+    if project_id:
+        spanner_client = spanner.Client(project=project_id)
+    else:
+        spanner_client = spanner.Client()
     instance = spanner_client.instance(instance_id)
     database = instance.database(database_id)
 
@@ -159,6 +162,7 @@ def main():
     parser.add_argument("--ontology_dir", required=True)
     parser.add_argument("--instance", required=True)
     parser.add_argument("--database", required=True)
+    parser.add_argument("--project", required=False, help="GCP Project ID")
     parser.add_argument("--apply-mode", choices=["auto-additive", "manual", "strict"], default="auto-additive")
     parser.add_argument("--apply", action="store_true")
     parser.add_argument(
@@ -191,7 +195,7 @@ def main():
         table_filter = set(canonical.keys())
 
     print(f"Fetching live schemas from Spanner ({args.instance}/{args.database})...")
-    live = get_live_spanner_schema(args.instance, args.database, table_filter=table_filter)
+    live = get_live_spanner_schema(args.project, args.instance, args.database, table_filter=table_filter)
 
     print("Comparing schemas for drift...")
     report = detect_drift(canonical, live)
@@ -217,7 +221,10 @@ def main():
             print(json.dumps(report["pending_evolution"], indent=2))
             if args.apply:
                 print("Applying schema evolution DDL to Spanner...")
-                spanner_client = spanner.Client()
+                if args.project:
+                    spanner_client = spanner.Client(project=args.project)
+                else:
+                    spanner_client = spanner.Client()
                 instance = spanner_client.instance(args.instance)
                 database = instance.database(args.database)
                 
