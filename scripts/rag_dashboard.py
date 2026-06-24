@@ -1407,7 +1407,7 @@ with tab4:
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
-# TAB 5: Graph Explorer - LIVE SPANNER FIX WITH DEBUG
+# TAB 5: Graph Explorer - QUICK FIX FOR LIVE DATA
 with tab5:
     st.markdown("### Interactive Network Graph Visualization")
     
@@ -1539,8 +1539,73 @@ with tab5:
                     st.code(str(live_err))
                 st.info("💡 Falling back to simulated ontology schema...")
 
-        # FALLBACK TO SIMULATED IF LIVE FAILED OR NO DATA
-        if not live_success or not nodes_res:
+        # RENDER LIVE GRAPH DATA (if successful)
+        # ❌ REMOVED: if live_success and nodes_res and nodes_res[0][0] not in ["driver", "vehicle", "hub"]:
+        # ✅ NEW: Always render if live_success - the check was preventing live graphs from showing
+        if live_success and nodes_res:
+            _update_progress(0.8, "Building live graph visualization...")
+            
+            try:
+                added_node_ids = set()
+                for entity_type, key, props_json in nodes_res:
+                    props = json.loads(props_json) if props_json else {}
+                    
+                    display_label = str(props.get("location_code") or props.get("name") or key)
+                    if len(display_label) > 12:
+                        display_label = display_label[:12] + "..."
+                    
+                    color = COLOR_MAP.get(entity_type.lower()) or COLOR_MAP.get(props.get("operation_type")) or "#94A3B8"
+                    size = 22
+                    if "HUB" in str(entity_type).upper() or props.get("location_code") == "MEM-HUB":
+                        size = 48
+                        color = "#F59E0B"
+                    elif "ROUTE" in str(entity_type).upper():
+                        size = 32
+                    
+                    tooltip = f"<b>{display_label}</b><br>Type: {entity_type}<br>ID: {key}<br>"
+                    for k, v in list(props.items())[:10]:
+                        if v not in (None, "", "null"):
+                            tooltip += f"{k.replace('_', ' ').title()}: {v}<br>"
+                    
+                    net.add_node(
+                        key,
+                        label=display_label,
+                        title=tooltip,
+                        color=color,
+                        size=size,
+                        font={"size": 15, "color": "#E2E8F0", "face": "arial"},
+                        shadow=True
+                    )
+                    added_node_ids.add(key)
+                
+                # Add edges for live data
+                for rel_type, key, source, target, props_json in edges_res:
+                    if source not in added_node_ids or target not in added_node_ids:
+                        continue
+                    
+                    props = json.loads(props_json) if props_json else {}
+                    tooltip = f"<b>{rel_type}</b><br>ID: {key}<br>" + \
+                              "<br>".join(f"{k}: {v}" for k, v in props.items() if v)
+                    
+                    try:
+                        net.add_edge(
+                            source, target,
+                            title=tooltip,
+                            color="#60A5FA",
+                            arrows="to",
+                            width=2.8,
+                            smooth={"type": "curvedCW", "roundness": 0.3}
+                        )
+                    except AssertionError:
+                        pass  # Skip if nodes don't exist
+            
+            except Exception as live_render_err:
+                st.error(f"❌ Error rendering live graph: {live_render_err}")
+                st.info("💡 Falling back to simulated schema visualization...")
+                live_success = False  # Force fallback
+        
+        # FALLBACK TO SIMULATED IF NOT LIVE_SUCCESS
+        if not live_success:
             _update_progress(0.3, "Loading simulated ontology schema...")
             
             if not config:
@@ -1550,18 +1615,15 @@ with tab5:
                     st.error(f"❌ Failed to load ontology config: {config_err}")
                     st.stop()
             
-            if not is_live:
-                st.caption("📌 Simulated mode — showing ontology schema from YAML.")
+            if is_live:
+                st.warning("📌 Live mode encountered issues. Showing simulated schema instead.")
             else:
-                st.warning("📌 Live Spanner mode failed. Showing simulated schema instead.")
-                if live_error:
-                    with st.expander("Why did live mode fail?"):
-                        st.error(live_error)
+                st.caption("📌 Simulated mode — showing ontology schema from YAML.")
             
-            # BUILD SIMULATED GRAPH WITH PROPER NODE TRACKING
+            # BUILD SIMULATED GRAPH
             node_colors = ["#1a73e8", "#F4A623", "#00bfa5", "#9C27B0", "#E91E8C", "#FF5722", "#607D8B"]
             
-            # STEP 1: Add all table nodes first
+            # STEP 1: Add all table nodes
             _update_progress(0.4, f"Adding {len(config.get('nodes', []))} object type nodes...")
             for idx, node in enumerate(config.get("nodes", [])):
                 try:
@@ -1657,14 +1719,14 @@ with tab5:
                     if src_table and src_table in table_nodes_added and rel in table_nodes_added:
                         try:
                             net.add_edge(src_table, rel, color="#539BF5", arrows="to", width=2)
-                        except AssertionError as ae:
-                            pass  # Silently skip
+                        except AssertionError:
+                            pass
                             
                     if dst_table and dst_table in table_nodes_added and rel in table_nodes_added:
                         try:
                             net.add_edge(rel, dst_table, color="#539BF5", arrows="to", width=2)
-                        except AssertionError as ae:
-                            pass  # Silently skip
+                        except AssertionError:
+                            pass
                     
                     edges_res.append((
                         rel,
@@ -1677,13 +1739,13 @@ with tab5:
                         })
                     ))
                 except Exception as edge_err:
-                    st.warning(f"⚠️ Failed to add edge: {edge_err}")
+                    pass  # Silently skip failed edges
         
         # Show KPIs
         _update_progress(0.85, "Finalizing...")
         kpi1, kpi2, kpi3 = st.columns(3)
         with kpi1:
-            st.metric(label="Total Nodes", value=str(len(table_nodes_added)))
+            st.metric(label="Total Nodes", value=str(len(table_nodes_added) if not live_success else len(set(n[1] for n in nodes_res))))
         with kpi2:
             st.metric(label="Total Edges", value=str(len(edges_res)))
         with kpi3:
@@ -1747,9 +1809,15 @@ with tab5:
             
             # Fallback table
             with st.expander("📊 Show Raw Graph Data (Nodes & Edges)"):
-                st.write(f"**Nodes ({len(table_nodes_added)}):**")
-                st.write(list(table_nodes_added)[:30])
-                st.write(f"**Sample Edges ({len(edges_res)}):**")
+                if live_success:
+                    st.write(f"**Live Data - Nodes ({len(nodes_res)}):**")
+                    for n in nodes_res[:10]:
+                        st.write(f"- {n[0]}: {n[1]}")
+                else:
+                    st.write(f"**Simulated Data - Nodes ({len(table_nodes_added)}):**")
+                    st.write(list(table_nodes_added)[:30])
+                
+                st.write(f"**Edges ({len(edges_res)}):**")
                 for edge in edges_res[:5]:
                     st.json(edge)
             
@@ -1773,8 +1841,14 @@ with tab5:
             st.info("💡 Showing raw data instead:")
             
             with st.expander("📊 Show Raw Graph Data (Nodes & Edges)"):
-                st.write(f"**Nodes ({len(table_nodes_added)}):**")
-                st.write(list(table_nodes_added))
+                if live_success:
+                    st.write(f"**Nodes ({len(nodes_res)}):**")
+                    for n in nodes_res[:20]:
+                        st.write(f"- {n[0]}: {n[1]}")
+                else:
+                    st.write(f"**Nodes ({len(table_nodes_added)}):**")
+                    st.write(list(table_nodes_added))
+                
                 st.write(f"**Edges ({len(edges_res)}):**")
                 for edge in edges_res:
                     st.json(edge)
