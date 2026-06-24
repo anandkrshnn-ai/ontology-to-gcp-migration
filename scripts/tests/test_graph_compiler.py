@@ -42,7 +42,7 @@ class TestGraphCompiler(unittest.TestCase):
     def test_table_and_view_generation(self):
         compiler = GraphCompiler(compatibility_status="ADDITIVE", schema_diffs={})
         table_ddl = compiler.generate_table_ddl(self.node_yaml)
-        self.assertIn("CREATE TABLE IF NOT EXISTS routing_node", table_ddl)
+        self.assertIn("CREATE TABLE routing_node", table_ddl)
         
         view_ddl = compiler.generate_view_ddl(self.node_yaml)
         self.assertIn("CREATE OR REPLACE VIEW v_routing_node", view_ddl)

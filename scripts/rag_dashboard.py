@@ -195,6 +195,8 @@ def load_ontology_graph_config(yaml_dict: dict) -> dict:
                         "key": pk,
                         "source": source_key,
                         "target": target_key,
+                        "source_table": spec.get("spec", {}).get("sourceType"),
+                        "target_table": spec.get("spec", {}).get("targetType"),
                         "properties": attrs,
                     })
         except Exception:
@@ -255,7 +257,8 @@ COLOR_MAP = {
 st.sidebar.title("🛠️ Mode & Connection")
 conn_mode = st.sidebar.radio(
     "Select Backend Connection Mode:",
-    ["Simulated (Mocked)", "Live Google Cloud Spanner"]
+    ["Simulated (Mocked)", "Live Google Cloud Spanner"],
+    index=0
 )
 
 # Gemini API Key Setup in Sidebar
@@ -321,8 +324,8 @@ if "last_conn_mode" not in st.session_state or st.session_state.last_conn_mode !
 # Tabs
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🎛️ Control Plane (Compiler)", 
-    "📥 Ingestion Zone (Telemetry)", 
-    "🔍 Serving Plane (GraphRAG)",
+    "📥 Ingestion Zone (Future)", 
+    "🔍 Serving Plane (Future)",
     "🛡️ Governance & Audit",
     "🌐 Graph Explorer"
 ])
@@ -501,9 +504,12 @@ with tab1:
 
         st.markdown("</div>", unsafe_allow_html=True)
 
+
+
 # TAB 2: Ingestion Zone
 with tab2:
-    st.markdown("### Telemetry Data Library & Extraction Zone")
+    st.markdown("### Telemetry Data Library & Extraction Zone (Future Development)")
+    st.info("🚧 **Roadmap Item:** This module will handle real-time unstructured log ingestion and vector embeddings in Phase 2.")
     
     col_ing1, col_ing2 = st.columns(2)
     
@@ -542,7 +548,8 @@ with tab2:
 
 # TAB 3: GraphRAG Serving
 with tab3:
-    st.markdown("### Interactive Graph-Backed Retrieval (GraphRAG)")
+    st.markdown("### Interactive Graph-Backed Retrieval (GraphRAG) - Future Development")
+    st.info("🚧 **Roadmap Item:** The Serving Plane demonstrating Gemini 1.5 Synthesis and Spanner Graph expansions will be finalized in Phase 2.")
     
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Ask the Serving Plane")
@@ -815,8 +822,19 @@ with tab5:
                         )
                         size = 30 if op_type == "HUB" else 15
                         
-                        title_text = "\n".join(f"{k}: {v}" for k, v in props.items())
+                        if props.get("location_code") == "MEM-HUB":
+                            size = 40
+                            entity_color = "#F59E0B"
+                        elif op_type == "HUB":
+                            size = 30
+                            
                         node_label = str(props.get("location_code") or props.get("operation_id") or key)
+                        title_lines = [
+                            f"type: {entity_type}",
+                            f"id: {key}",
+                        ] + [f"{k}: {v}" for k, v in props.items()]
+                        title_text = "\n".join(title_lines)
+                        
                         net.add_node(
                             key,
                             label=node_label,
@@ -840,19 +858,65 @@ with tab5:
             # SIMULATED MODE: build ontology-schema graph from YAML definitions
             config = load_ontology_graph_config(st.session_state.yamls)
             node_colors = ["#1a73e8", "#F4A623", "#00bfa5", "#9C27B0", "#E91E8C", "#FF5722", "#607D8B"]
+
+            # Add nodes for object tables
+            table_nodes_added = set()
             for idx, node in enumerate(config["nodes"]):
                 color = node_colors[idx % len(node_colors)]
-                title = f"Table: {node['table']}\nPK: {node['key']}\nProps: {', '.join(node['properties'])}"
-                net.add_node(node["table"], label=node["table"], title=title, color=color, size=20)
-            for edge in config["edges"]:
-                net.add_node(
-                    edge["table"], label=edge["table"],
-                    title=f"Relationship: {edge['table']}\n{edge['source']} → {edge['target']}",
-                    color="#539BF5", size=12, shape="diamond"
+                title = (
+                    f"Table: {node['table']}\n"
+                    f"PK: {node['key']}\n"
+                    f"Props: {', '.join(node['properties'])}"
                 )
-                net.add_edge(edge["source"], edge["table"], color="#539BF5", arrows="to")
-                net.add_edge(edge["table"], edge["target"], color="#539BF5", arrows="to")
-            st.caption("📌 Simulated mode — showing ontology schema from YAML. Switch to Live Spanner for real data.")
+                net.add_node(
+                    node["table"],
+                    label=node["table"],
+                    title=title,
+                    color=color,
+                    size=20,
+                )
+                table_nodes_added.add(node["table"])
+
+            # Add relationship nodes + edges between tables
+            for edge in config["edges"]:
+                src = edge["source_table"]
+                dst = edge["target_table"]
+                rel = edge["table"]
+
+                # Ensure source/target nodes exist
+                if src not in table_nodes_added:
+                    net.add_node(src, label=src, title=f"Table: {src}", color="#1a73e8", size=18)
+                    table_nodes_added.add(src)
+                if dst not in table_nodes_added:
+                    net.add_node(dst, label=dst, title=f"Table: {dst}", color="#F4A623", size=18)
+                    table_nodes_added.add(dst)
+
+                # Relationship node as diamond in the middle
+                rel_title = (
+                    f"Relationship: {rel}\n"
+                    f"{edge['source']} → {edge['target']}\n"
+                    f"Props: {', '.join(edge['properties'])}"
+                )
+                net.add_node(
+                    rel,
+                    label=rel,
+                    title=rel_title,
+                    color="#4B5563",
+                    size=12,
+                    shape="diamond",
+                    font={"color": "#a0a0a0", "face": "italic"}
+                )
+
+                net.add_edge(src, rel, color="#539BF5", arrows="to")
+                net.add_edge(rel, dst, color="#539BF5", arrows="to")
+
+            st.caption(
+                "📌 Simulated mode — showing ontology schema from YAML. "
+                "Switch to Live Spanner for real data."
+            )
+
+        # Enable built-in interaction controls
+        net.show_buttons(filter_=["physics"])
 
         # Configure physics for better layout
         net.set_options("""
@@ -874,7 +938,7 @@ with tab5:
             }
           },
           "physics": {
-            "enabled": true,
+            "enabled": false,
             "forceAtlas2Based": {
               "gravitationalConstant": -50,
               "centralGravity": 0.01,
@@ -889,7 +953,8 @@ with tab5:
           "interaction": {
             "hover": true,
             "tooltipDelay": 100,
-            "navigationButtons": true
+            "navigationButtons": true,
+            "selectConnectedEdges": true
           }
         }
         """)
@@ -904,6 +969,9 @@ with tab5:
             html_content = f.read()
             
         st.components.v1.html(html_content, height=620, scrolling=False)
+        
+        with open(html_path, "rb") as f:
+            st.download_button("📥 Export Graph HTML", f, "ontology_graph.html", "text/html")
         os.unlink(html_path)
         
     st.info("💡 **Impact Analysis:** The graph above highlights how multiple routings depend on the `MEM-HUB` central node. This is a visual representation of the property graph queries that power the GraphRAG serving plane.")

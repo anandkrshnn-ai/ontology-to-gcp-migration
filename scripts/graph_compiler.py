@@ -112,7 +112,7 @@ class GraphCompiler:
             required = " NOT NULL" if prop_def.get("required", False) else ""
             columns.append(f"    {prop_name} {spanner_type}{required}")
 
-        ddl = f"CREATE TABLE IF NOT EXISTS {table_name} (\n" + ",\n".join(columns) + f"\n) PRIMARY KEY ({primary_key});"
+        ddl = f"CREATE TABLE {table_name} (\n" + ",\n".join(columns) + f"\n) PRIMARY KEY ({primary_key})"
         return ddl
 
     def generate_view_ddl(self, entity_yaml: Dict[str, Any]) -> str:
@@ -132,7 +132,7 @@ class GraphCompiler:
         view_name = f"v_{table_name}"
         
         # Thin view layer abstraction over physical storage
-        ddl = f"CREATE OR REPLACE VIEW {view_name} SQL SECURITY INVOKER AS \nSELECT {selected_cols} \nFROM {table_name} AS t;"
+        ddl = f"CREATE OR REPLACE VIEW {view_name} SQL SECURITY INVOKER AS \nSELECT {selected_cols} \nFROM {table_name} AS t"
         return ddl
 
     def generate_property_graph_ddl(self, graph_yaml: Dict[str, Any]) -> str:
@@ -184,7 +184,7 @@ class GraphCompiler:
         ddl = (
             f"CREATE OR REPLACE PROPERTY GRAPH {graph_name}\n"
             f"  NODE TABLES (\n{nodes_ddl}\n  )\n"
-            f"  EDGE TABLES (\n{edges_ddl}\n  );"
+            f"  EDGE TABLES (\n{edges_ddl}\n  )"
         )
         return ddl
 
