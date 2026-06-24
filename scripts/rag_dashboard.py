@@ -1544,8 +1544,49 @@ with tab5:
                 
                 _update_progress(0.7, "Processing graph data...")
                 
+                # Dynamically assign colors based on entity type
+                node_colors = ["#F4A623", "#00bfa5", "#1a73e8", "#9C27B0", "#E91E8C", "#FF5722", "#607D8B"]
+                color_map = {}
+                table_nodes_added = set()
+                
+                # Add nodes
+                for node in nodes_res:
+                    e_type = node[0]
+                    key = node[1]
+                    props = json.loads(node[2])
+                    
+                    if e_type not in color_map:
+                        color_map[e_type] = node_colors[len(color_map) % len(node_colors)]
+                        
+                    title = f"Type: {e_type}\nID: {key}\n"
+                    for k, v in props.items():
+                        title += f"{k}: {v}\n"
+                        
+                    net.add_node(
+                        key,  # Node ID is the primary key
+                        label=f"{e_type}: {key}",
+                        title=title,
+                        color=color_map[e_type],
+                        size=20
+                    )
+                    table_nodes_added.add(key)
+                
+                # Add edges
+                for edge in edges_res:
+                    rel_type = edge[0]
+                    source = edge[2]
+                    target = edge[3]
+                    props = json.loads(edge[4])
+                    
+                    title = f"Rel: {rel_type}\n"
+                    for k, v in props.items():
+                        title += f"{k}: {v}\n"
+                        
+                    if source in table_nodes_added and target in table_nodes_added:
+                        net.add_edge(source, target, title=title, color="#808080", arrows="to")
+                        
             except Exception as e:
-                st.warning(f"⚠️ Live Spanner unavailable: {str(e)[:100]}")
+                st.warning(f"⚠️ Live Spanner unavailable or graph population failed: {str(e)[:100]}")
                 st.info("Falling back to simulated ontology schema...")
                 is_live = False  # Force fallback
 
