@@ -392,6 +392,8 @@ if conn_mode == "Live Google Cloud Spanner":
     else:
         st.success(f"⚡ Connected to Live Spanner: `{spanner_instance}/{spanner_database}`")
         is_live = True
+        st.sidebar.success("🟢 Live Spanner Connected")
+        st.sidebar.metric("Nodes Loaded", len(nodes_res) if 'nodes_res' in locals() else "—")
 else:
     registry_manager = SpannerRegistryManager(mock=True)
     is_live = False
@@ -1105,14 +1107,14 @@ with tab5:
           "physics": {
             "enabled": true,
             "forceAtlas2Based": {
-              "gravitationalConstant": -50,
-              "centralGravity": 0.01,
-              "springLength": 100,
-              "springConstant": 0.08
+              "gravitationalConstant": -80,
+              "centralGravity": 0.015,
+              "springLength": 120,
+              "springConstant": 0.06
             },
             "solver": "forceAtlas2Based",
             "stabilization": {
-              "iterations": 150
+              "iterations": 200
             }
           },
           "interaction": {
