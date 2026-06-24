@@ -105,6 +105,7 @@ def get_live_spanner_schema(project_id, instance_id, database_id, table_filter=N
                 live_schema[table_name][column_name] = spanner_type
     except Exception as e:
         print(f"Error querying Spanner: {e}")
+        raise e
 
     return live_schema
 
