@@ -1,0 +1,33 @@
+# Dataflow worker image build & push pipeline.
+# Triggered only when dataflow/ directory changes.
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'build-dataflow-worker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/dataflow-workers/ontology-bulk-load:$COMMIT_SHA'
+      - 'dataflow/ontology_bulk_load'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-dataflow-worker-sha'
+    args:
+      - 'push'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/dataflow-workers/ontology-bulk-load:$COMMIT_SHA'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'tag-dataflow-worker-latest'
+    args:
+      - 'tag'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/dataflow-workers/ontology-bulk-load:$COMMIT_SHA'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/dataflow-workers/ontology-bulk-load:latest'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    id: 'push-dataflow-worker-latest'
+    args:
+      - 'push'
+      - 'us-central1-docker.pkg.dev/$PROJECT_ID/dataflow-workers/ontology-bulk-load:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
