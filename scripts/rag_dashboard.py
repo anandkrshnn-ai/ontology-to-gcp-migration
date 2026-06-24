@@ -99,46 +99,81 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom Premium Styling (Dark Mode, Glassmorphism, Rounded Cards)
+# Material Design 3 Custom Styling
 st.markdown("""
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
+    /* Global Typography */
+    html, body, [class*="st-"] {
+        font-family: 'Inter', sans-serif !important;
+    }
     .main {
-        background-color: #0e1117;
+        background-color: #121212;
         color: #e0e0e0;
     }
     .stApp {
-        background-color: #0d0f14;
+        background-color: #121212;
     }
+    /* Material 3 Buttons */
     div.stButton > button {
         background-color: #1a73e8;
         color: white;
-        border-radius: 8px;
-        font-weight: 600;
-        padding: 0.6em 2em;
+        border-radius: 24px;
+        font-weight: 500;
+        letter-spacing: 0.25px;
+        padding: 0.5em 1.5em;
         border: none;
-        transition: all 0.3s ease;
+        transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+        box-shadow: 0 1px 2px 0 rgba(0,0,0,0.3), 0 1px 3px 1px rgba(0,0,0,0.15);
     }
     div.stButton > button:hover {
         background-color: #1557b0;
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(26,115,232,0.3);
+        box-shadow: 0 1px 3px 0 rgba(0,0,0,0.3), 0 4px 8px 3px rgba(0,0,0,0.15);
+        transform: translateY(-1px);
     }
+    /* Elevated Cards */
     .card {
-        background: rgba(255, 255, 255, 0.03);
+        background: #1e1e1e;
         border: 1px solid rgba(255, 255, 255, 0.05);
         border-radius: 12px;
         padding: 1.5em;
         margin-bottom: 1em;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+        box-shadow: 0 1px 3px 0 rgba(0,0,0,0.3), 0 4px 8px 3px rgba(0,0,0,0.15);
     }
     .step-header {
-        font-weight: 700;
+        font-weight: 600;
         font-size: 1.1em;
-        color: #1a73e8;
+        color: #8ab4f8;
         margin-bottom: 0.5em;
     }
     code {
-        color: #ff7b72 !important;
+        color: #ff8a65 !important;
+    }
+    /* KPI Metric styling */
+    div[data-testid="metric-container"] {
+        background: #1e1e1e;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        padding: 1em;
+        box-shadow: 0 1px 2px 0 rgba(0,0,0,0.3);
+    }
+    div[data-testid="metric-container"] label {
+        color: #9aa0a6;
+    }
+    div[data-testid="metric-container"] div {
+        color: #e8eaed;
+        font-weight: 500;
+    }
+    /* Terminal Console */
+    .terminal-console {
+        background-color: #000000;
+        color: #00FF00;
+        font-family: 'Courier New', Courier, monospace;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #333;
+        max-height: 400px;
+        overflow-y: auto;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -380,6 +415,16 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 with tab1:
     st.markdown("### Structural Ontology Registry & Compilation")
     
+    # KPIs
+    m1, m2, m3 = st.columns(3)
+    with m1:
+        st.metric(label="Registry State", value="Active" if is_live else "Simulated")
+    with m2:
+        st.metric(label="Ontology Entities", value=str(len(st.session_state.yamls)))
+    with m3:
+        st.metric(label="Dataflow Pipelines", value="Ready")
+
+    
     col1, col2 = st.columns([1, 2])
     
     with col1:
@@ -523,7 +568,7 @@ with tab1:
                             continue
                         log_text += line
                         log_text = log_text[-3000:]
-                        log_container.code(log_text, language="bash")
+                        log_container.markdown(f'<div class="terminal-console"><pre>{log_text}</pre></div>', unsafe_allow_html=True)
                     process.stdout.close()
                     process.wait(timeout=120)
                     if process.returncode == 0:
@@ -870,6 +915,14 @@ with tab5:
 
                 nodes_res, edges_res = fetch_graph_data(config, registry_manager.spanner_db)
                 
+                kpi1, kpi2, kpi3 = st.columns(3)
+                with kpi1:
+                    st.metric(label="Total Nodes", value=str(len(nodes_res)))
+                with kpi2:
+                    st.metric(label="Total Edges", value=str(len(edges_res)))
+                with kpi3:
+                    st.metric(label="Spanner Backend", value="Connected 🟢" if is_live else "Mocked 🟡")
+                
                 if not nodes_res:
                     st.info(
                         "🗄️ Database empty — no graph to display.\n\n"
@@ -1050,7 +1103,7 @@ with tab5:
             }
           },
           "physics": {
-            "enabled": false,
+            "enabled": true,
             "forceAtlas2Based": {
               "gravitationalConstant": -50,
               "centralGravity": 0.01,
