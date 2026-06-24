@@ -25,6 +25,7 @@ from datetime import date
 from pathlib import Path
 
 from google.cloud import spanner
+import decimal
 
 # ── Config ────────────────────────────────────────────────────────────────────
 PROJECT  = os.environ.get("SPANNER_PROJECT",  "migiration-demo")
@@ -58,7 +59,7 @@ def _coerce_row(table: str, row: dict) -> tuple:
             row["origin_operation_id"],
             row["destination_operation_id"],
             row["transport_mode"] or None,
-            float(row["weight"])  if row["weight"]  else None,
+            decimal.Decimal(row["weight"])  if row["weight"]  else None,
             int(row["pieces"])    if row["pieces"]   else None,
             date.fromisoformat(row["zulu_day"]),
         )
@@ -67,6 +68,26 @@ def _coerce_row(table: str, row: dict) -> tuple:
             row["transit_path_id"],
             row["segment_id"],
             int(row["total_transit_minutes"]) if row["total_transit_minutes"] else None,
+        )
+    if table == "vehicle":
+        return (
+            row["vehicle_id"],
+            row["vehicle_type"] or None,
+            int(row["capacity_kg"]) if row["capacity_kg"] else None,
+        )
+    if table == "driver":
+        return (
+            row["driver_id"],
+            row["assigned_vehicle_id"] or None,
+            row["license_type"] or None,
+            row["status"] or None,
+        )
+    if table == "maintenance_log":
+        return (
+            row["log_id"],
+            row["vehicle_id"] or None,
+            row["issue_type"] or None,
+            int(row["severity"]) if row["severity"] else None,
         )
     raise ValueError(f"Unknown table: {table}")
 
@@ -95,6 +116,21 @@ TABLES = [
         "table":   "transit_path",
         "csv":     DATA_DIR / "transit_path.csv",
         "columns": ["transit_path_id", "segment_id", "total_transit_minutes"],
+    },
+    {
+        "table":   "vehicle",
+        "csv":     DATA_DIR / "vehicle.csv",
+        "columns": ["vehicle_id", "vehicle_type", "max_weight_capacity"],
+    },
+    {
+        "table":   "driver",
+        "csv":     DATA_DIR / "driver.csv",
+        "columns": ["driver_id", "vehicle_id", "certification_level", "status"],
+    },
+    {
+        "table":   "maintenance_log",
+        "csv":     DATA_DIR / "maintenance_log.csv",
+        "columns": ["log_id", "vehicle_id", "issue_type", "severity"],
     },
 ]
 
@@ -125,9 +161,9 @@ def seed_table(db, spec: dict) -> int:
 
 def verify_counts(db) -> dict[str, int]:
     counts = {}
-    with db.snapshot() as snap:
-        for spec in TABLES:
-            t = spec["table"]
+    for spec in TABLES:
+        t = spec["table"]
+        with db.snapshot() as snap:
             result = snap.execute_sql(f"SELECT COUNT(*) FROM {t}")
             counts[t] = list(result)[0][0]
     return counts

@@ -24,6 +24,18 @@ spec:
       tableName: transit_path
       key: transit_path_id
       label: TransitPath
+    - objectType: Vehicle
+      tableName: vehicle
+      key: vehicle_id
+      label: Vehicle
+    - objectType: Driver
+      tableName: driver
+      key: driver_id
+      label: Driver
+    - objectType: MaintenanceLog
+      tableName: maintenance_log
+      key: log_id
+      label: MaintenanceLog
   edges:
     - label: HAS_SEGMENT
       tableName: network_routing_segment
@@ -55,3 +67,15 @@ spec:
       relationshipType: SATISFIES
       source: { nodeType: transit_path, key: transit_path_id, foreignKey: transit_path_id }
       target: { nodeType: network_routing_segment, key: segment_id, foreignKey: segment_id }
+    - label: DRIVES
+      tableName: driver
+      key: driver_id
+      relationshipType: DRIVES
+      source: { nodeType: driver, key: driver_id, foreignKey: driver_id }
+      target: { nodeType: vehicle, key: vehicle_id, foreignKey: vehicle_id }
+    - label: HAS_MAINTENANCE
+      tableName: maintenance_log
+      key: log_id
+      relationshipType: HAS_MAINTENANCE
+      source: { nodeType: vehicle, key: vehicle_id, foreignKey: vehicle_id }
+      target: { nodeType: maintenance_log, key: log_id, foreignKey: vehicle_id }

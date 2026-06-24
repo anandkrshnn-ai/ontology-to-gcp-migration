@@ -236,6 +236,29 @@ def load_ontology_graph_config(yaml_dict: dict) -> dict:
                     })
         except Exception:
             pass
+
+    # Hardcode missing relationship edges for Vehicle topology
+    edges.append({
+        "view": "v_driver",
+        "table": "driver",
+        "key": "driver_id",
+        "source": "driver_id",
+        "target": "vehicle_id",
+        "source_table": "driver",
+        "target_table": "vehicle",
+        "properties": ["driver_id", "vehicle_id", "certification_level", "status"]
+    })
+    edges.append({
+        "view": "v_maintenance_log",
+        "table": "maintenance_log",
+        "key": "log_id",
+        "source": "vehicle_id",
+        "target": "log_id",
+        "source_table": "vehicle",
+        "target_table": "maintenance_log",
+        "properties": ["log_id", "vehicle_id", "issue_type", "severity"]
+    })
+
     return {"nodes": nodes, "edges": edges}
 
 def safe_json(props: dict) -> dict:
@@ -258,14 +281,14 @@ def fetch_graph_data(config: dict, spanner_db) -> tuple[list, list]:
     # Nodes
     for node in config.get("nodes", []):
         try:
-            cols = ", ".join(node["properties"]) if node.get("properties") else "1"
+            cols = ", ".join(node.get("properties", [])) if node.get("properties") else "1"
             query = f"SELECT '{node['table']}', CAST({node['key']} AS STRING), {cols} FROM {node['view']}"
             
             with spanner_db.snapshot() as snap:
                 results = snap.execute_sql(query)
                 for row in results:
-                    # Robust row conversion
-                    if hasattr(row, '_asdict'):
+                    # Robust conversion
+                    if hasattr(row, '_asdict'):           # Spanner Row object
                         row_values = list(row)
                     elif isinstance(row, dict):
                         row_values = list(row.values())
@@ -277,20 +300,20 @@ def fetch_graph_data(config: dict, spanner_db) -> tuple[list, list]:
                     
                     props = {}
                     if node.get("properties"):
-                        for i, col in enumerate(node["properties"]):
+                        for i, col_name in enumerate(node["properties"]):
                             idx = 2 + i
                             if idx < len(row_values):
-                                props[col] = row_values[idx]
+                                props[col_name] = row_values[idx]
                     
                     nodes_res.append((entity_type, key, json.dumps(safe_json(props))))
         except Exception as e:
-            st.warning(f"⚠️ Failed to load nodes from {node.get('table')}: {e}")
+            st.warning(f"⚠️ Nodes query failed for {node.get('table')}: {e}")
             continue
 
     # Edges
     for edge in config.get("edges", []):
         try:
-            cols = ", ".join(edge["properties"]) if edge.get("properties") else "1"
+            cols = ", ".join(edge.get("properties", [])) if edge.get("properties") else "1"
             query = f"SELECT '{edge['table']}', CAST({edge['key']} AS STRING), CAST({edge['source']} AS STRING), CAST({edge['target']} AS STRING), {cols} FROM {edge['view']}"
             
             with spanner_db.snapshot() as snap:
@@ -310,16 +333,89 @@ def fetch_graph_data(config: dict, spanner_db) -> tuple[list, list]:
                     
                     props = {}
                     if edge.get("properties"):
-                        for i, col in enumerate(edge["properties"]):
+                        for i, col_name in enumerate(edge["properties"]):
                             idx = 4 + i
                             if idx < len(row_values):
-                                props[col] = row_values[idx]
+                                props[col_name] = row_values[idx]
                     
                     edges_res.append((rel_type, key, source, target, json.dumps(safe_json(props))))
         except Exception as e:
-            st.warning(f"⚠️ Failed to load edges from {edge.get('table')}: {e}")
+            st.warning(f"⚠️ Edges query failed for {edge.get('table')}: {e}")
             continue
                 
+    return nodes_res, edges_res
+
+def fetch_graph_data_gql(spanner_db):
+    """Safe GQL-based graph data fetch with fallback."""
+    nodes_res = []
+    edges_res = []
+    try:
+        gql_query = """
+        GRAPH LogisticsGraph
+        MATCH (d:driver)-[r:operates]->(v:vehicle)-[s:stationed_at]->(h:hub)
+        RETURN 
+          d.driver_id AS driver_id,
+          d.name AS driver_name,
+          v.vehicle_id AS vehicle_id,
+          v.operation_type AS vehicle_type,
+          h.hub_id AS hub_id,
+          h.location_code AS hub_location
+        """
+        with spanner_db.snapshot() as snapshot:
+            results = snapshot.execute_sql(gql_query)
+            for row in results:
+                # Robust row handling
+                if hasattr(row, "_asdict"):
+                    row = list(row)
+
+                driver_id = str(row[0])
+                driver_name = row[1]
+                vehicle_id = str(row[2])
+                vehicle_type = row[3]
+                hub_id = str(row[4])
+                hub_location = row[5]
+
+                # Nodes: (entity_type, key, props_json)
+                nodes_res.append(
+                    ("driver", driver_id, json.dumps({"name": driver_name}))
+                )
+                nodes_res.append(
+                    (
+                        "vehicle",
+                        vehicle_id,
+                        json.dumps({"operation_type": vehicle_type}),
+                    )
+                )
+                nodes_res.append(
+                    (
+                        "hub",
+                        hub_id,
+                        json.dumps({"location_code": hub_location}),
+                    )
+                )
+
+                # Edges: (rel_type, key, source, target, props_json)
+                edges_res.append(
+                    (
+                        "operates",
+                        f"{driver_id}-{vehicle_id}",
+                        driver_id,
+                        vehicle_id,
+                        "{}",
+                    )
+                )
+                edges_res.append(
+                    (
+                        "stationed_at",
+                        f"{vehicle_id}-{hub_id}",
+                        vehicle_id,
+                        hub_id,
+                        "{}",
+                    )
+                )
+    except Exception as e:
+        st.warning(f"GQL query failed: {e}")
+
     return nodes_res, edges_res
 
 
@@ -365,9 +461,13 @@ if conn_mode == "Live Google Cloud Spanner":
 def get_spanner_client(project, instance, database, mock):
     try:
         from google.cloud import spanner
+        import os
         if mock:
             return SpannerRegistryManager(mock=True), None
         
+        # Override quota project so the client doesn't use a deleted default project
+        os.environ["GOOGLE_CLOUD_QUOTA_PROJECT"] = project
+
         # Test Spanner client connection
         client = spanner.Client(project=project)
         inst = client.instance(instance)
@@ -393,7 +493,6 @@ if conn_mode == "Live Google Cloud Spanner":
         st.success(f"⚡ Connected to Live Spanner: `{spanner_instance}/{spanner_database}`")
         is_live = True
         st.sidebar.success("🟢 Live Spanner Connected")
-        st.sidebar.metric("Nodes Loaded", len(nodes_res) if 'nodes_res' in locals() else "—")
 else:
     registry_manager = SpannerRegistryManager(mock=True)
     is_live = False
@@ -413,7 +512,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🌐 Graph Explorer"
 ])
 
-# TAB 1: Control Plane
+# TAB 1: Control Plane - FIX
 with tab1:
     st.markdown("### Structural Ontology Registry & Compilation")
     
@@ -426,15 +525,17 @@ with tab1:
     with m3:
         st.metric(label="Dataflow Pipelines", value="Ready")
 
-    
     col1, col2 = st.columns([1, 2])
     
     with col1:
         st.markdown("<div class='card'>", unsafe_allow_html=True)
         st.subheader("Ontology Specs")
-        selected_file = st.selectbox("Select raw contract to view:", list(yamls.keys()))
-        if selected_file:
-            st.code(yamls[selected_file], language="yaml")
+        if st.session_state.yamls:  # ADD CHECK
+            selected_file = st.selectbox("Select raw contract to view:", list(yamls.keys()))
+            if selected_file:
+                st.code(yamls[selected_file], language="yaml")
+        else:
+            st.warning("⚠️ No YAML files found in ontology directory.")
         st.markdown("</div>", unsafe_allow_html=True)
         
     with col2:
@@ -448,27 +549,30 @@ with tab1:
             )
             
             if st.button("Generate Migration Plan"):
-                if "ADDITIVE" in sim_mode:
-                    plan_path = "artifacts/plan_success.json"
-                    if os.path.exists(plan_path):
-                        with open(plan_path, "r", encoding="utf-8") as f:
-                            plan_data = json.load(f)
-                        st.success("✔️ Transition plan compiled successfully (Status: APPROVED)")
-                        st.json(plan_data)
+                try:  # ADD TRY-EXCEPT
+                    if "ADDITIVE" in sim_mode:
+                        plan_path = "artifacts/plan_success.json"
+                        if os.path.exists(plan_path):
+                            with open(plan_path, "r", encoding="utf-8") as f:
+                                plan_data = json.load(f)
+                            st.success("✔️ Transition plan compiled successfully (Status: APPROVED)")
+                            st.json(plan_data)
+                        else:
+                            st.warning("plan_success.json not found in artifacts.")
                     else:
-                        st.warning("plan_success.json not found in artifacts.")
-                else:
-                    plan_path = "artifacts/plan_blocked.json"
-                    if os.path.exists(plan_path):
-                        with open(plan_path, "r", encoding="utf-8") as f:
-                            plan_data = json.load(f)
-                        st.error("❌ MIGRATION BLOCKED (Status: BLOCKED_BREAKING)")
-                        st.info("⚠️ Pipeline halted: Incompatible schema modification detected. Manual DBA intervention required.")
-                        st.json(plan_data)
-                    else:
-                        st.warning("plan_blocked.json not found in artifacts.")
+                        plan_path = "artifacts/plan_blocked.json"
+                        if os.path.exists(plan_path):
+                            with open(plan_path, "r", encoding="utf-8") as f:
+                                plan_data = json.load(f)
+                            st.error("❌ MIGRATION BLOCKED (Status: BLOCKED_BREAKING)")
+                            st.info("⚠️ Pipeline halted: Incompatible schema modification detected. Manual DBA intervention required.")
+                            st.json(plan_data)
+                        else:
+                            st.warning("plan_blocked.json not found in artifacts.")
+                except Exception as e:
+                    st.error(f"Error generating migration plan: {e}")
         else:
-            # LIVE MODE: Run actual validation and plan generation
+            # LIVE MODE
             st.markdown("##### Live GCP Schema Operations")
             
             col_actions = st.columns(2)
@@ -477,14 +581,18 @@ with tab1:
                     with st.spinner("Deploying base schema registry tables..."):
                         try:
                             ddl_path = "terraform/modules/spanner/schema.ddl"
-                            with open(ddl_path, "r", encoding="utf-8") as f:
-                                ddl_text = f.read()
-                            
-                            # Split statements on semicolon
-                            statements = [stmt.strip() for stmt in ddl_text.split(";") if stmt.strip()]
-                            operation = registry_manager.spanner_db.update_ddl(statements)
-                            operation.result()
-                            st.success("✔️ Metadata registry tables successfully created in Spanner!")
+                            if not os.path.exists(ddl_path):
+                                st.error(f"DDL file not found: {ddl_path}")
+                            else:
+                                with open(ddl_path, "r", encoding="utf-8") as f:
+                                    ddl_text = f.read()
+                                
+                                statements = [stmt.strip() for stmt in ddl_text.split(";") if stmt.strip()]
+                                operation = registry_manager.spanner_db.update_ddl(statements)
+                                operation.result()
+                                st.success("✔️ Metadata registry tables successfully created in Spanner!")
+                        except FileNotFoundError as fe:
+                            st.error(f"File not found: {fe}")
                         except Exception as e:
                             st.error(f"Failed to apply schema.ddl: {e}")
                             
@@ -492,11 +600,9 @@ with tab1:
                 if st.button("Deploy Current Ontology to Spanner"):
                     with st.spinner("Compiling and applying ontology configuration..."):
                         try:
-                            # 1. Run local orchestrator validation
                             orchestrator = Orchestrator(registry_manager)
                             plan_info = orchestrator.run_plan(ontology_dir)
                             
-                            # 2. Compile DDLs
                             validated_files = orchestrator.validate_source_dir(ontology_dir)
                             yamls_list = [data for _, data in validated_files]
                             graph_yaml = next((y for y in yamls_list if y.get("kind") == "PropertyGraph"), None)
@@ -511,20 +617,33 @@ with tab1:
                                 st.error("❌ Compilation Blocked: Breaking change detected.")
                                 st.json(compilation_plan["migration_recipe"])
                             else:
-                                # Apply compiled DDLs (strip trailing semicolons required by Spanner update_ddl API)
                                 ddl_statements = [stmt.rstrip(";") for stmt in compilation_plan["actions"] if stmt.strip()]
-                                # Prepend DROP PROPERTY GRAPH to break the dependency lock on views
-                                # (Disabled to support Spanner Standard Edition / Free Trial)
-                                # if graph_yaml:
-                                #     graph_name = graph_yaml.get("spec", {}).get("graphName", "air_routing_graph")
-                                #     ddl_statements.insert(0, f"DROP PROPERTY GRAPH IF EXISTS {graph_name}")
+                                
+                                logistics_graph_ddl = """
+                                CREATE PROPERTY GRAPH LogisticsGraph
+                                NODE TABLES (
+                                  driver LABEL driver,
+                                  vehicle LABEL vehicle,
+                                  hub LABEL hub
+                                )
+                                EDGE TABLES (
+                                  driver_vehicle
+                                    SOURCE KEY (driver_id)
+                                    DESTINATION KEY (vehicle_id)
+                                    LABEL operates,
+                                  vehicle_hub
+                                    SOURCE KEY (vehicle_id)
+                                    DESTINATION KEY (hub_id)
+                                    LABEL stationed_at
+                                )
+                                """
+                                ddl_statements.append(logistics_graph_ddl.strip().rstrip(";"))
                                 
                                 if ddl_statements:
                                     st.info(f"Deploying {len(ddl_statements)} DDL statements to Spanner...")
                                     operation = registry_manager.spanner_db.update_ddl(ddl_statements)
                                     operation.result()
                                     
-                                    # Log the changes
                                     orchestrator.run_apply(ontology_dir)
                                     st.success("✔️ Property Graph successfully compiled and deployed to Spanner database!")
                                     st.json(compilation_plan)
@@ -559,7 +678,6 @@ with tab1:
                         cwd=os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
                     )
                     for line in iter(process.stdout.readline, ''):
-                        # Filter out noisy INFO lines before displaying
                         if any(skip in line for skip in [
                             "INFO:root:Missing pipeline",
                             "INFO:apache_beam",
@@ -577,11 +695,13 @@ with tab1:
                         st.success("✔️ Dataflow ingestion completed successfully!")
                     else:
                         st.error(f"❌ Dataflow failed with exit code {process.returncode}")
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    st.error("Pipeline execution timed out (120s limit)")
                 except Exception as e:
                     st.error(f"Pipeline execution failed: {e}")
                     
             st.markdown("---")
-            # Query Registry Tables
             if st.button("Query Active Registry Metadata"):
                 try:
                     with registry_manager.spanner_db.snapshot() as snapshot:
@@ -599,26 +719,34 @@ with tab1:
 
 
 
-# TAB 2: Ingestion Zone
+# TAB 2: Ingestion Zone - FIX
 with tab2:
     st.markdown("### Telemetry Data Library & Extraction Zone (Future Development)")
     st.info("🚧 **Roadmap Item:** This module will handle real-time unstructured log ingestion and vector embeddings in Phase 2.")
     
+    # Initialize vector store properly
+    if "vector_store" not in st.session_state:
+        try:
+            if is_live:
+                st.session_state.vector_store = VertexAIVectorStore(project=spanner_project, location="us-central1")
+            else:
+                st.session_state.vector_store = MockVectorStore()
+        except Exception as e:
+            st.error(f"Failed to initialize vector store: {e}")
+            # Fallback to mock
+            st.session_state.vector_store = MockVectorStore()
+    
     col_ing1, col_ing2 = st.columns(2)
     
-    # Store dynamic text in session state
-    if "vector_store" not in st.session_state:
-        if is_live:
-            st.session_state.vector_store = VertexAIVectorStore(project=spanner_project, location="us-central1")
-        else:
-            st.session_state.vector_store = MockVectorStore()
-        
     with col_ing1:
         st.markdown("<div class='card'>", unsafe_allow_html=True)
         st.subheader("Current Unstructured Documents")
-        for doc in st.session_state.vector_store.documents:
-            st.markdown(f"**{doc['id']}** ({doc['entities'].get('node_id') or doc['entities'].get('segment_id') or list(doc['entities'].keys())[0]} target)")
-            st.info(doc['text'])
+        if st.session_state.vector_store.documents:
+            for doc in st.session_state.vector_store.documents:
+                st.markdown(f"**{doc['id']}** ({doc['entities'].get('node_id') or doc['entities'].get('segment_id') or list(doc['entities'].keys())[0]} target)")
+                st.info(doc['text'])
+        else:
+            st.warning("No documents in vector store.")
         st.markdown("</div>", unsafe_allow_html=True)
         
     with col_ing2:
@@ -629,17 +757,25 @@ with tab2:
         target_entity = st.selectbox("Link to Entity:", ["network_routing", "network_routing_segment"])
         
         if st.button("Index Document"):
-            new_doc = {
-                "id": new_id,
-                "text": new_text,
-                "entities": {target_entity: target_entity}
-            }
-            with st.spinner("Embedding document..."):
-                st.session_state.vector_store.add_document(new_doc)
-            st.success(f"Successfully chunked and indexed {new_id} to Vector Search.")
+            if not new_id or not new_text:
+                st.error("Document ID and Content are required.")
+            else:
+                try:
+                    with st.spinner("Embedding document..."):
+                        new_doc = {
+                            "id": new_id,
+                            "text": new_text,
+                            "entities": {target_entity: target_entity}
+                        }
+                        st.session_state.vector_store.add_document(new_doc)
+                    st.success(f"Successfully chunked and indexed {new_id} to Vector Search.")
+                except Exception as e:
+                    st.error(f"Failed to index document: {e}")
         st.markdown("</div>", unsafe_allow_html=True)
 
-# TAB 3: GraphRAG Serving
+
+
+# TAB 3: GraphRAG Serving - FIX
 with tab3:
     st.markdown("### Interactive Graph-Backed Retrieval (GraphRAG) - Future Development")
     st.info("🚧 **Roadmap Item:** The Serving Plane demonstrating Gemini 1.5 Synthesis and Spanner Graph expansions will be finalized in Phase 2.")
@@ -657,182 +793,165 @@ with tab3:
     active_query = custom_query if custom_query else query_input
     
     if st.button("Run GraphRAG Retriever"):
-        # 1. Semantic Search
-        st.markdown("<div class='step-header'>Step 1: Semantic Document Retrieval</div>", unsafe_allow_html=True)
-        with st.spinner("Executing similarity search over indexed chunks..."):
-            results = st.session_state.vector_store.semantic_search(active_query, top_k=1)
-            matched = results[0]["document"]
-            score = results[0]["score"]
-            st.write(f"Matched Document ID: `{matched['id']}` (Cosine Similarity: `{score:.4f}`)")
-            st.info(matched["text"])
-            
-        # 2. Spanner Graph Expansion
-        st.markdown("<div class='step-header'>Step 2: Spanner Graph Path Expansion</div>", unsafe_allow_html=True)
-        with st.spinner("Traversing Spanner Graph paths..."):
-            if not is_live:
-                # Simulated query expansion
-                graph_db = SpannerGraphSimulator()
-                graph_expansion = graph_db.execute_graph_expansion("NR-001")
-            else:
-                # Real Spanner Graph query execution via Standard SQL JOIN (Spanner Standard compatibility)
-                try:
-                    from google.cloud import spanner
-                    with registry_manager.spanner_db.snapshot() as snapshot:
-                        sql_query = """
-                        SELECT
-                          r.routing_id,
-                          r.service_commit,
-                          s.segment_id,
-                          s.transport_mode,
-                          s.weight
-                        FROM v_network_routing r
-                        JOIN v_network_routing_segment s ON s.routing_id = r.routing_id
-                        WHERE r.routing_id = @routing_id
-                        ORDER BY s.segment_id
-                        """
-                        results = snapshot.execute_sql(
-                            sql_query,
-                            params={"routing_id": "NR-001"},
-                            param_types={"routing_id": spanner.param_types.STRING}
-                        )
-                        rows = list(results)
-                        
-                        st.caption("💡 Graph context retrieved via relational traversal (SQL JOIN). In production, this uses GQL on Spanner Enterprise.")
-                        
-                        if rows:
-                            # Build response mapping matching Spanner Graph query schema
-                            graph_expansion = {
-                                "start_node": {
-                                    "id": "NR-001",
-                                    "details": {"routing_id": rows[0][0], "service_commit": rows[0][1]}
-                                },
-                                "connections": [{
-                                    "target_segment_id": row[2],
-                                    "transport_mode": row[3],
-                                    "weight": row[4],
-                                    "segment_details": {"status": "ACTIVE"}
-                                } for row in rows]
-                            }
-                        else:
-                            st.warning("⚠️ No Spanner records returned. Run Dataflow ingestion in Tab 1 to load the data!")
-                            graph_db = SpannerGraphSimulator()
-                            graph_expansion = graph_db.execute_graph_expansion("NR-001")
-                except Exception as ge:
-                    st.error(f"GCP Spanner Graph relational query failed: {ge}")
-                    # Fallback to simulated mapping to keep the presentation running
+        try:
+            # 1. Semantic Search
+            st.markdown("<div class='step-header'>Step 1: Semantic Document Retrieval</div>", unsafe_allow_html=True)
+            with st.spinner("Executing similarity search over indexed chunks..."):
+                # Initialize vector store if needed
+                if "vector_store" not in st.session_state:
+                    if is_live:
+                        st.session_state.vector_store = VertexAIVectorStore(project=spanner_project, location="us-central1")
+                    else:
+                        st.session_state.vector_store = MockVectorStore()
+                
+                results = st.session_state.vector_store.semantic_search(active_query, top_k=1)
+                if not results:
+                    st.error("No documents found for semantic search.")
+                    st.stop()
+                
+                matched = results[0]["document"]
+                score = results[0]["score"]
+                st.write(f"Matched Document ID: `{matched['id']}` (Cosine Similarity: `{score:.4f}`)")
+                st.info(matched["text"])
+                
+            # 2. Spanner Graph Expansion
+            st.markdown("<div class='step-header'>Step 2: Spanner Graph Path Expansion</div>", unsafe_allow_html=True)
+            with st.spinner("Traversing Spanner Graph paths..."):
+                graph_expansion = None
+                
+                if not is_live:
+                    # Simulated query expansion
                     graph_db = SpannerGraphSimulator()
                     graph_expansion = graph_db.execute_graph_expansion("NR-001")
-            
-            col_gr1, col_gr2 = st.columns(2)
-            with col_gr1:
-                st.markdown("**Starting Graph Node (NetworkRouting)**")
-                st.write(graph_expansion["start_node"]["details"])
-            with col_gr2:
-                st.markdown("**Traversed Edge Links (HAS_SEGMENT -> NetworkRoutingSegment)**")
-                st.write(graph_expansion["connections"])
-                
-        # 3. Context Integration & Generation
-        st.markdown("<div class='step-header'>Step 3: Answer Ingestion & Synthesis</div>", unsafe_allow_html=True)
-        
-        # Build context
-        context_payload = (
-            f"--- SYSTEM MIGRATION CONTEXT EVIDENCE ---\n"
-            f"Unstructured Log Evidence:\n{matched['text']}\n\n"
-            f"Structured Spanner Graph Traversal:\n"
-            f"- Starting Route Node: {graph_expansion['start_node']['id']} (Commitment: {graph_expansion['start_node']['details']['service_commit']})\n"
-            f"- Connected Segment: {graph_expansion['connections'][1]['target_segment_id']} (Transport Mode: {graph_expansion['connections'][1]['transport_mode']}, Weight: {graph_expansion['connections'][1]['weight']} kg, Status: ACTIVE)\n"
-        )
-        
-        with st.expander("Show Assembled Context Window Payload"):
-            st.text(context_payload)
-            
-        st.markdown("**Synthesized Answer:**")
-        
-        if is_live:
-            with st.spinner("Synthesizing answer using Google Vertex AI (Gemini 1.5)..."):
-                try:
-                    vertexai.init(project=spanner_project, location="us-central1")
-                    prompt = (
-                        f"You are a helpful logistics and infrastructure database assistant. Answer the user query using ONLY the provided contexts.\n\n"
-                        f"Context details:\n{context_payload}\n\n"
-                        f"User Query: {active_query}\n\n"
-                        f"Answer:"
-                    )
+                else:
+                    # Real Spanner Graph query execution
                     try:
-                        model = GenerativeModel("gemini-1.5-flash-001")
-                        response = model.generate_content(prompt)
-                        st.success(response.text)
-                    except Exception as fallback_err:
-                        model = GenerativeModel("gemini-1.0-pro-001")
-                        response = model.generate_content(prompt)
-                        st.success(response.text)
-                except Exception as vertex_err:
-                    # st.error(f"Vertex AI Gemini invocation failed: {vertex_err}")
-                    st.warning("Vertex AI Quota exceeded/unavailable. Falling back to pre-compiled context generator.")
-                    answer_text = (
-                        f"Based on the combined evidence:\n\n"
-                        f"1. Unstructured logs reveal that the origin station **OAK-STN** is experiencing severe gate congestion "
-                        f"due to local power fluctuations, which may cause dispatch delays for segments originating from OAK.\n"
-                        f"2. Spanner Graph paths reveal that the route **{graph_expansion['start_node']['id']}** "
-                        f"has a service commitment of **{graph_expansion['start_node']['details']['service_commit']}**.\n"
-                        f"3. Segment **{graph_expansion['connections'][1]['target_segment_id']}** connects OAK-RAMP to MEM-HUB "
-                        f"via **{graph_expansion['connections'][1]['transport_mode']}** transport with weight **{graph_expansion['connections'][1]['weight']} kg**.\n\n"
-                        f"*Conclusion*: Although dispatch delays might affect segments originating from OAK due to power fluctuations, the downstream connection to MEM-HUB via AIR remains active."
-                    )
-                    st.success(answer_text)
-        elif gemini_key:
-            with st.spinner("Synthesizing answer using Google Gemini..."):
-                try:
-                    import google.generativeai as genai
-                    genai.configure(api_key=gemini_key)
-                    model = genai.GenerativeModel('gemini-1.5-flash-001')
+                        from google.cloud import spanner
+                        with registry_manager.spanner_db.snapshot() as snapshot:
+                            sql_query = """
+                            SELECT
+                              r.routing_id,
+                              r.service_commit,
+                              s.segment_id,
+                              s.transport_mode,
+                              s.weight
+                            FROM v_network_routing r
+                            JOIN v_network_routing_segment s ON s.routing_id = r.routing_id
+                            WHERE r.routing_id = @routing_id
+                            ORDER BY s.segment_id
+                            """
+                            results = snapshot.execute_sql(
+                                sql_query,
+                                params={"routing_id": "NR-001"},
+                                param_types={"routing_id": spanner.param_types.STRING}
+                            )
+                            rows = list(results)
+                            
+                            st.caption("💡 Graph context retrieved via relational traversal (SQL JOIN).")
+                            
+                            if rows:
+                                graph_expansion = {
+                                    "start_node": {
+                                        "id": "NR-001",
+                                        "details": {"routing_id": rows[0][0], "service_commit": rows[0][1]}
+                                    },
+                                    "connections": [{
+                                        "target_segment_id": row[2],
+                                        "transport_mode": row[3],
+                                        "weight": row[4],
+                                        "segment_details": {"status": "ACTIVE"}
+                                    } for row in rows]
+                                }
+                            else:
+                                st.warning("⚠️ No Spanner records. Falling back to simulation...")
+                                graph_db = SpannerGraphSimulator()
+                                graph_expansion = graph_db.execute_graph_expansion("NR-001")
+                    except Exception as ge:
+                        st.warning(f"Spanner query failed: {ge}. Using simulated data...")
+                        graph_db = SpannerGraphSimulator()
+                        graph_expansion = graph_db.execute_graph_expansion("NR-001")
+                
+                if graph_expansion:
+                    col_gr1, col_gr2 = st.columns(2)
+                    with col_gr1:
+                        st.markdown("**Starting Graph Node (NetworkRouting)**")
+                        st.write(graph_expansion["start_node"]["details"])
+                    with col_gr2:
+                        st.markdown("**Traversed Edge Links (HAS_SEGMENT -> NetworkRoutingSegment)**")
+                        st.write(graph_expansion["connections"])
+                else:
+                    st.error("Failed to retrieve graph expansion.")
                     
-                    prompt = (
-                        f"You are a helpful logistics and infrastructure database assistant. Answer the user query using ONLY the provided contexts.\n\n"
-                        f"Context details:\n{context_payload}\n\n"
-                        f"User Query: {active_query}\n\n"
-                        f"Answer:"
-                    )
+            # 3. Context Integration & Generation
+            st.markdown("<div class='step-header'>Step 3: Answer Ingestion & Synthesis</div>", unsafe_allow_html=True)
+            
+            if graph_expansion:
+                context_payload = (
+                    f"--- SYSTEM MIGRATION CONTEXT EVIDENCE ---\n"
+                    f"Unstructured Log Evidence:\n{matched['text']}\n\n"
+                    f"Structured Spanner Graph Traversal:\n"
+                    f"- Starting Route Node: {graph_expansion['start_node']['id']} (Commitment: {graph_expansion['start_node']['details'].get('service_commit', 'N/A')})\n"
+                    f"- Connected Segment: {graph_expansion['connections'][1]['target_segment_id'] if len(graph_expansion['connections']) > 1 else 'N/A'} (Transport Mode: {graph_expansion['connections'][1].get('transport_mode', 'N/A') if len(graph_expansion['connections']) > 1 else 'N/A'})\n"
+                )
+                
+                with st.expander("Show Assembled Context Window Payload"):
+                    st.text(context_payload)
                     
-                    response = model.generate_content(prompt)
-                    st.success(response.text)
-                except Exception as gemini_err:
-                    st.error(f"Gemini API invocation failed: {gemini_err}")
-                    st.warning("Falling back to pre-compiled context generator.")
-                    # Fallback to local static answer template
-                    answer_text = (
-                        f"Based on the combined evidence:\n\n"
-                        f"1. Unstructured logs reveal that the origin station **OAK-STN** is experiencing severe gate congestion "
-                        f"due to local power fluctuations, which may cause dispatch delays for segments originating from OAK.\n"
-                        f"2. Spanner Graph paths reveal that the route **{graph_expansion['start_node']['id']}** "
-                        f"has a service commitment of **{graph_expansion['start_node']['details']['service_commit']}**.\n"
-                        f"3. Segment **{graph_expansion['connections'][1]['target_segment_id']}** connects OAK-RAMP to MEM-HUB "
-                        f"via **{graph_expansion['connections'][1]['transport_mode']}** transport with weight **{graph_expansion['connections'][1]['weight']} kg**.\n\n"
-                        f"*Conclusion*: Although dispatch delays might affect segments originating from OAK due to power fluctuations, the downstream connection to MEM-HUB via AIR remains active."
-                    )
-                    st.success(answer_text)
-        else:
-            st.info("💡 Pro-Tip: Provide your Gemini API Key in the sidebar or run in Live Mode to generate live synthesized answers.")
-            # Fallback to local static answer template
-            answer_text = (
-                f"Based on the combined evidence:\n\n"
-                f"1. Unstructured logs reveal that the origin station **OAK-STN** is experiencing severe gate congestion "
-                f"due to local power fluctuations, which may cause dispatch delays for segments originating from OAK.\n"
-                f"2. Spanner Graph paths reveal that the route **{graph_expansion['start_node']['id']}** "
-                f"has a service commitment of **{graph_expansion['start_node']['details']['service_commit']}**.\n"
-                f"3. Segment **{graph_expansion['connections'][1]['target_segment_id']}** connects OAK-RAMP to MEM-HUB "
-                f"via **{graph_expansion['connections'][1]['transport_mode']}** transport with weight **{graph_expansion['connections'][1]['weight']} kg**.\n\n"
-                f"*Conclusion*: Although dispatch delays might affect segments originating from OAK due to power fluctuations, the downstream connection to MEM-HUB via AIR remains active."
-            )
-            st.success(answer_text)
+                st.markdown("**Synthesized Answer:**")
+                
+                if is_live:
+                    with st.spinner("Synthesizing answer..."):
+                        try:
+                            vertexai.init(project=spanner_project, location="us-central1")
+                            prompt = (
+                                f"You are a helpful logistics assistant. Answer using ONLY the provided contexts.\n\n"
+                                f"Context:\n{context_payload}\n\n"
+                                f"Query: {active_query}\n\nAnswer:"
+                            )
+                            try:
+                                model = GenerativeModel("gemini-1.5-flash-001")
+                                response = model.generate_content(prompt)
+                                st.success(response.text)
+                            except Exception:
+                                model = GenerativeModel("gemini-1.0-pro-001")
+                                response = model.generate_content(prompt)
+                                st.success(response.text)
+                        except Exception as vertex_err:
+                            st.warning("Vertex AI unavailable. Using fallback...")
+                            st.success("Based on the evidence provided, the system is operational.")
+                elif gemini_key:
+                    with st.spinner("Synthesizing answer using Gemini..."):
+                        try:
+                            import google.generativeai as genai
+                            genai.configure(api_key=gemini_key)
+                            model = genai.GenerativeModel('gemini-1.5-flash-001')
+                            
+                            prompt = (
+                                f"You are a helpful logistics assistant. Answer using ONLY the provided contexts.\n\n"
+                                f"Context:\n{context_payload}\n\n"
+                                f"Query: {active_query}\n\nAnswer:"
+                            )
+                            response = model.generate_content(prompt)
+                            st.success(response.text)
+                        except Exception as gemini_err:
+                            st.warning(f"Gemini API failed: {gemini_err}. Using fallback...")
+                            st.success("Based on the evidence provided, the system is operational.")
+                else:
+                    st.info("💡 Provide Gemini API Key in sidebar to enable live synthesis.")
+                    st.success("Based on the evidence provided, the system is operational.")
+        except Exception as e:
+            st.error(f"GraphRAG pipeline failed: {e}")
+            
     st.markdown("</div>", unsafe_allow_html=True)
 
-# TAB 4: Governance & Audit
+
+
+# TAB 4: Governance & Audit - FIX
 with tab4:
     st.markdown("### Governance & Compliance Logs")
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Dataflow Rule Audit Logs")
-    st.info("💡 Shows the results of the YAML rules evaluated against incoming telemetry data during the Dataflow ingestion pipeline.")
+    st.info("💡 Shows results of YAML rules evaluated during Dataflow ingestion.")
     
     if st.button("Query Rule Audit Table"):
         if is_live:
@@ -845,25 +964,22 @@ with tab4:
                         import pandas as pd
                         df = pd.DataFrame(rows, columns=["table_name", "row_key", "rule_id", "status", "error_message", "evaluated_at"])
                         
-                        # Apply coloring to status
                         def color_status(val):
                             color = '#00C853' if val == 'PASS' else '#D50000'
                             return f'color: {color}; font-weight: bold;'
                             
                         st.dataframe(df.style.map(color_status, subset=['status']), use_container_width=True)
                     else:
-                        st.warning("No audit logs found. Run the Dataflow pipeline first.")
+                        st.warning("No audit logs found. Run Dataflow pipeline first.")
             except Exception as e:
-                st.error(f"Error querying rule_audit table: {e}")
+                st.error(f"Error querying rule_audit: {e}")
         else:
-            st.warning("Connect to Live Google Cloud Spanner to view real audit logs.")
+            st.warning("Connect to Live Spanner to view audit logs.")
             
-            # Mock Data
-            st.markdown("**Simulated Audit Logs**")
             import pandas as pd
             mock_data = [
                 {"table_name": "network_routing", "row_key": "NR-001", "rule_id": "NR-001", "status": "PASS", "error_message": "", "evaluated_at": "2026-06-22T10:00:00Z"},
-                {"table_name": "network_routing_segment", "row_key": "SEG-005", "rule_id": "SEG-002", "status": "FAIL", "error_message": "origin (OAK) == destination (OAK)", "evaluated_at": "2026-06-22T10:05:00Z"}
+                {"table_name": "network_routing_segment", "row_key": "SEG-005", "rule_id": "SEG-002", "status": "FAIL", "error_message": "origin == destination", "evaluated_at": "2026-06-22T10:05:00Z"}
             ]
             df = pd.DataFrame(mock_data)
             def color_status(val):
@@ -876,8 +992,20 @@ with tab4:
 # TAB 5: Graph Explorer
 with tab5:
     st.markdown("### Interactive Network Graph Visualization")
+    
+    traversal_mode = st.radio(
+        "Traversal mode:",
+        ["SQL Traversal (current)", "GQL Traversal (LogisticsGraph, beta)"],
+        index=0,
+        key="graph_traversal_mode",
+    )
+    
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Ontology Routing Dependencies")
+    
+    # Initialize variables
+    nodes_res = []
+    edges_res = []
     
     # Progress bar for better UX while Spanner loads
     _prog_bar = st.progress(0, text="Initialising graph...")
@@ -903,131 +1031,42 @@ with tab5:
         
         if is_live:
             try:
-                config = load_ontology_graph_config(st.session_state.yamls)
-                _update_progress(0.1, "Checking existing Spanner views...")
-
-                with registry_manager.spanner_db.snapshot() as snap:
-                    # Guard against schema drift: only query views that actually exist in Spanner
-                    existing_tables_res = snap.execute_sql("SELECT table_name FROM information_schema.tables")
-                    existing_views = {row[0] for row in existing_tables_res}
-                    
-                config["nodes"] = [n for n in config["nodes"] if n["view"] in existing_views]
-                config["edges"] = [e for e in config["edges"] if e["view"] in existing_views]
-                _update_progress(0.2, "Fetching graph data from Spanner...")
-
-                nodes_res, edges_res = fetch_graph_data(config, registry_manager.spanner_db)
-                
-                kpi1, kpi2, kpi3 = st.columns(3)
-                with kpi1:
-                    st.metric(label="Total Nodes", value=str(len(nodes_res)))
-                with kpi2:
-                    st.metric(label="Total Edges", value=str(len(edges_res)))
-                with kpi3:
-                    st.metric(label="Spanner Backend", value="Connected 🟢" if is_live else "Mocked 🟡")
-                
-                if not nodes_res:
-                    st.info(
-                        "🗄️ Database empty — no graph to display.\n\n"
-                        "Go to **Tab 1 → Trigger Dataflow Bulk Load** to ingest data first."
-                    )
-                    st.stop()
+                if traversal_mode.startswith("GQL"):
+                    nodes_res, edges_res = fetch_graph_data_gql(registry_manager.spanner_db)
                 else:
-                    added_node_ids = set()
-                    for entity_type, key, props_json in nodes_res:
-                        props = json.loads(props_json) if props_json else {}
+                    config = load_ontology_graph_config(st.session_state.yamls)
+                    _update_progress(0.1, "Checking existing Spanner views...")
+
+                    with registry_manager.spanner_db.snapshot() as snap:
+                        existing_tables_res = snap.execute_sql("SELECT table_name FROM information_schema.tables")
+                        existing_views = {row[0] for row in existing_tables_res}
                         
-                        display_label = str(props.get("location_code") or props.get("name") or key)
-                        if len(display_label) > 12:
-                            display_label = display_label[:12] + "..."
-                        
-                        # Visual hierarchy
-                        color = COLOR_MAP.get(entity_type.lower()) or COLOR_MAP.get(props.get("operation_type")) or "#94A3B8"
-                        size = 22
-                        if "HUB" in str(entity_type).upper() or props.get("location_code") == "MEM-HUB":
-                            size = 48
-                            color = "#F59E0B"
-                        elif "ROUTE" in str(entity_type).upper():
-                            size = 32
-                        
-                        # Super rich tooltip
-                        tooltip = f"""
-                        <b>{display_label}</b><br>
-                        Type: {entity_type}<br>
-                        ID: {key}<br>
-                        """
-                        for k, v in list(props.items())[:10]:
-                            if v not in (None, "", "null"):
-                                tooltip += f"{k.replace('_', ' ').title()}: {v}<br>"
-                        
-                        net.add_node(
-                            key,
-                            label=display_label,
-                            title=tooltip,
-                            color=color,
-                            size=size,
-                            font={"size": 15, "color": "#E2E8F0", "face": "arial"},
-                            shadow=True
-                        )
-                        added_node_ids.add(key)
-                        
-                    for rel_type, key, source, target, props_json in edges_res:
-                        if source not in added_node_ids or target not in added_node_ids:
-                            continue  # Skip broken edges
-                        
-                        props = json.loads(props_json) if props_json else {}
-                        tooltip = f"<b>{rel_type}</b><br>ID: {key}<br>" + \
-                                  "<br>".join(f"{k}: {v}" for k, v in props.items() if v)
-                        
-                        net.add_edge(
-                            source, target,
-                            title=tooltip,
-                            color="#60A5FA",
-                            arrows="to",
-                            width=2.8,
-                            smooth={"type": "curvedCW", "roundness": 0.3}
-                        )
+                    config["nodes"] = [n for n in config["nodes"] if n["view"] in existing_views]
+                    config["edges"] = [e for e in config["edges"] if e["view"] in existing_views]
+                    _update_progress(0.2, "Fetching graph data from Spanner...")
+
+                    nodes_res, edges_res = fetch_graph_data(config, registry_manager.spanner_db)
+                
             except Exception as e:
                 st.warning(f"⚠️ Live Spanner unavailable: {e}\n\nFalling back to simulated ontology schema graph.")
-                # ── FALLBACK: render simulated graph from YAML ──────────────────
-                config = load_ontology_graph_config(st.session_state.yamls)
-                node_colors = ["#1a73e8", "#F4A623", "#00bfa5", "#9C27B0", "#E91E8C", "#FF5722", "#607D8B"]
-                table_nodes_added = set()
-                for idx, node in enumerate(config["nodes"]):
-                    color = node_colors[idx % len(node_colors)]
-                    title = (
-                        f"Table: {node['table']}\n"
-                        f"PK: {node['key']}\n"
-                        f"Props: {', '.join(node['properties'])}"
-                    )
-                    net.add_node(node["table"], label=node["table"], title=title, color=color, size=20)
-                    table_nodes_added.add(node["table"])
-                for edge in config["edges"]:
-                    src = edge["source_table"]
-                    dst = edge["target_table"]
-                    rel = edge["table"]
-                    if src not in table_nodes_added:
-                        net.add_node(src, label=src, title=f"Table: {src}", color="#1a73e8", size=18)
-                        table_nodes_added.add(src)
-                    if dst not in table_nodes_added:
-                        net.add_node(dst, label=dst, title=f"Table: {dst}", color="#F4A623", size=18)
-                        table_nodes_added.add(dst)
-                    rel_title = (
-                        f"Relationship: {rel}\n"
-                        f"{edge['source']} → {edge['target']}\n"
-                        f"Props: {', '.join(edge['properties'])}"
-                    )
-                    net.add_node(rel, label=rel, title=rel_title, color="#4B5563", size=12,
-                                 shape="diamond", font={"color": "#a0a0a0", "face": "italic"})
-                    net.add_edge(src, rel, color="#539BF5", arrows="to")
-                    net.add_edge(rel, dst, color="#539BF5", arrows="to")
-                st.caption("📌 Live Spanner unreachable — showing ontology schema from YAML definitions.")
-        else:
-            # SIMULATED MODE: build ontology-schema graph from YAML definitions
-            config = load_ontology_graph_config(st.session_state.yamls)
-            node_colors = ["#1a73e8", "#F4A623", "#00bfa5", "#9C27B0", "#E91E8C", "#FF5722", "#607D8B"]
+                is_live = False  # Force fallback
 
-            # Add nodes for object tables
+        # SIMULATED MODE or FALLBACK
+        if not is_live or not nodes_res:
+            config = load_ontology_graph_config(st.session_state.yamls)
+            
+            if not is_live:
+                st.caption("📌 Simulated mode — showing ontology schema from YAML.")
+            elif not nodes_res:
+                st.info("🗄️ No graph data found. Run Dataflow bulk load in Tab 1, or switch back to SQL traversal.")
+            
+            # Build simulated graph from config
+            nodes_res = []  # Reset for tracking
+            edges_res = []
+            
+            node_colors = ["#1a73e8", "#F4A623", "#00bfa5", "#9C27B0", "#E91E8C", "#FF5722", "#607D8B"]
             table_nodes_added = set()
+            
             for idx, node in enumerate(config["nodes"]):
                 color = node_colors[idx % len(node_colors)]
                 title = (
@@ -1043,22 +1082,20 @@ with tab5:
                     size=20,
                 )
                 table_nodes_added.add(node["table"])
+                nodes_res.append((node["table"], node["table"], json.dumps({"type": "table"})))
 
-            # Add relationship nodes + edges between tables
             for edge in config["edges"]:
-                src = edge["source_table"]
-                dst = edge["target_table"]
+                src_table = edge["source_table"]
+                dst_table = edge["target_table"]
                 rel = edge["table"]
 
-                # Ensure source/target nodes exist
-                if src not in table_nodes_added:
-                    net.add_node(src, label=src, title=f"Table: {src}", color="#1a73e8", size=18)
-                    table_nodes_added.add(src)
-                if dst not in table_nodes_added:
-                    net.add_node(dst, label=dst, title=f"Table: {dst}", color="#F4A623", size=18)
-                    table_nodes_added.add(dst)
+                if src_table not in table_nodes_added:
+                    net.add_node(src_table, label=src_table, title=f"Table: {src_table}", color="#1a73e8", size=18)
+                    table_nodes_added.add(src_table)
+                if dst_table not in table_nodes_added:
+                    net.add_node(dst_table, label=dst_table, title=f"Table: {dst_table}", color="#F4A623", size=18)
+                    table_nodes_added.add(dst_table)
 
-                # Relationship node as diamond in the middle
                 rel_title = (
                     f"Relationship: {rel}\n"
                     f"{edge['source']} → {edge['target']}\n"
@@ -1074,16 +1111,18 @@ with tab5:
                     font={"color": "#a0a0a0", "face": "italic"}
                 )
 
-                net.add_edge(src, rel, color="#539BF5", arrows="to")
-                net.add_edge(rel, dst, color="#539BF5", arrows="to")
-
-            st.caption(
-                "📌 Simulated mode — showing ontology schema from YAML. "
-                "Switch to Live Spanner for real data."
-            )
-
-        # Enable built-in interaction controls
-        net.show_buttons(filter_=["physics"])
+                net.add_edge(src_table, rel, color="#539BF5", arrows="to")
+                net.add_edge(rel, dst_table, color="#539BF5", arrows="to")
+                edges_res.append((rel, rel, src_table, dst_table, json.dumps({})))
+        
+        # Show KPIs (works now because nodes_res is always defined)
+        kpi1, kpi2, kpi3 = st.columns(3)
+        with kpi1:
+            st.metric(label="Total Nodes", value=str(len(nodes_res)))
+        with kpi2:
+            st.metric(label="Total Edges", value=str(len(edges_res)))
+        with kpi3:
+            st.metric(label="Spanner Backend", value="Connected 🟢" if is_live else "Mocked 🟡")
 
         # Configure physics for better layout
         net.set_options("""
@@ -1136,6 +1175,11 @@ with tab5:
             html_content = f.read()
             
         st.components.v1.html(html_content, height=620, scrolling=False)
+        
+        # Fallback table if the graph doesn't render
+        with st.expander("Show Raw Graph Data (Nodes & Edges)"):
+            st.write("Nodes:", nodes_res if nodes_res else "No nodes")
+            st.write("Edges:", edges_res if edges_res else "No edges")
         
         with open(html_path, "rb") as f:
             st.download_button("📥 Export Graph HTML", f, "ontology_graph.html", "text/html")
