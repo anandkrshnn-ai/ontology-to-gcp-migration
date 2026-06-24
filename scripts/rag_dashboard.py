@@ -221,27 +221,65 @@ def fetch_graph_data(config: dict, spanner_db) -> tuple[list, list]:
     for node in config["nodes"]:
         cols = ", ".join(node["properties"]) if node["properties"] else "1"
         query = f"SELECT '{node['table']}', CAST({node['key']} AS STRING), {cols} FROM {node['view']}"
-        with spanner_db.snapshot() as snap:
-            for row in snap.execute_sql(query):
-                entity_type = row[0]
-                key = str(row[1]) if row[1] is not None else ""
-                props = dict(zip(node["properties"], row[2:])) if node["properties"] else {}
-                nodes_res.append((entity_type, key, json.dumps(safe_json(props))))
+        try:
+            with spanner_db.snapshot() as snap:
+                results = snap.execute_sql(query)
+                for row in results:
+                    # Robust row handling - Spanner rows can be Row objects, dicts, or plain lists
+                    if hasattr(row, '_asdict'):
+                        row_values = list(row)
+                    elif isinstance(row, dict):
+                        row_values = list(row.values())
+                    else:
+                        row_values = list(row)
+
+                    entity_type = str(row_values[0])
+                    key = str(row_values[1]) if len(row_values) > 1 and row_values[1] is not None else ""
+
+                    props = {}
+                    if node["properties"] and len(row_values) > 2:
+                        for i, col_name in enumerate(node["properties"]):
+                            if 2 + i < len(row_values):
+                                props[col_name] = row_values[2 + i]
+
+                    nodes_res.append((entity_type, key, json.dumps(safe_json(props))))
+        except Exception as e:
+            st.warning(f"Failed to fetch nodes for {node['table']}: {e}")
+            continue
 
     edges_res = []
     for edge in config["edges"]:
         cols = ", ".join(edge["properties"]) if edge["properties"] else "1"
         query = f"SELECT '{edge['table']}', CAST({edge['key']} AS STRING), CAST({edge['source']} AS STRING), CAST({edge['target']} AS STRING), {cols} FROM {edge['view']}"
-        with spanner_db.snapshot() as snap:
-            for row in snap.execute_sql(query):
-                rel_type = row[0]
-                key = str(row[1]) if row[1] is not None else ""
-                source = str(row[2]) if row[2] is not None else ""
-                target = str(row[3]) if row[3] is not None else ""
-                props = dict(zip(edge["properties"], row[4:])) if edge["properties"] else {}
-                edges_res.append((rel_type, key, source, target, json.dumps(safe_json(props))))
-                
+        try:
+            with spanner_db.snapshot() as snap:
+                results = snap.execute_sql(query)
+                for row in results:
+                    if hasattr(row, '_asdict'):
+                        row_values = list(row)
+                    elif isinstance(row, dict):
+                        row_values = list(row.values())
+                    else:
+                        row_values = list(row)
+
+                    rel_type = str(row_values[0])
+                    key = str(row_values[1]) if len(row_values) > 1 else ""
+                    source = str(row_values[2]) if len(row_values) > 2 else ""
+                    target = str(row_values[3]) if len(row_values) > 3 else ""
+
+                    props = {}
+                    if edge["properties"] and len(row_values) > 4:
+                        for i, col_name in enumerate(edge["properties"]):
+                            if 4 + i < len(row_values):
+                                props[col_name] = row_values[4 + i]
+
+                    edges_res.append((rel_type, key, source, target, json.dumps(safe_json(props))))
+        except Exception as e:
+            st.warning(f"Failed to fetch edges for {edge['table']}: {e}")
+            continue
+
     return nodes_res, edges_res
+
 
 COLOR_MAP = {
     "STATION":  "#1a73e8",
@@ -853,7 +891,40 @@ with tab5:
                             arrows="to"
                         )
             except Exception as e:
-                st.error(f"Error querying graph data from Spanner: {e}")
+                st.warning(f"⚠️ Live Spanner unavailable: {e}\n\nFalling back to simulated ontology schema graph.")
+                # ── FALLBACK: render simulated graph from YAML ──────────────────
+                config = load_ontology_graph_config(st.session_state.yamls)
+                node_colors = ["#1a73e8", "#F4A623", "#00bfa5", "#9C27B0", "#E91E8C", "#FF5722", "#607D8B"]
+                table_nodes_added = set()
+                for idx, node in enumerate(config["nodes"]):
+                    color = node_colors[idx % len(node_colors)]
+                    title = (
+                        f"Table: {node['table']}\n"
+                        f"PK: {node['key']}\n"
+                        f"Props: {', '.join(node['properties'])}"
+                    )
+                    net.add_node(node["table"], label=node["table"], title=title, color=color, size=20)
+                    table_nodes_added.add(node["table"])
+                for edge in config["edges"]:
+                    src = edge["source_table"]
+                    dst = edge["target_table"]
+                    rel = edge["table"]
+                    if src not in table_nodes_added:
+                        net.add_node(src, label=src, title=f"Table: {src}", color="#1a73e8", size=18)
+                        table_nodes_added.add(src)
+                    if dst not in table_nodes_added:
+                        net.add_node(dst, label=dst, title=f"Table: {dst}", color="#F4A623", size=18)
+                        table_nodes_added.add(dst)
+                    rel_title = (
+                        f"Relationship: {rel}\n"
+                        f"{edge['source']} → {edge['target']}\n"
+                        f"Props: {', '.join(edge['properties'])}"
+                    )
+                    net.add_node(rel, label=rel, title=rel_title, color="#4B5563", size=12,
+                                 shape="diamond", font={"color": "#a0a0a0", "face": "italic"})
+                    net.add_edge(src, rel, color="#539BF5", arrows="to")
+                    net.add_edge(rel, dst, color="#539BF5", arrows="to")
+                st.caption("📌 Live Spanner unreachable — showing ontology schema from YAML definitions.")
         else:
             # SIMULATED MODE: build ontology-schema graph from YAML definitions
             config = load_ontology_graph_config(st.session_state.yamls)
