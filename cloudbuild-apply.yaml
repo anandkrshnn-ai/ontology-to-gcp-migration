@@ -54,7 +54,11 @@ steps:
         export PYTHONPATH=/workspace
         pip install -r requirements.txt -q
         echo "=== Step 3: Detecting schema drift ==="
-        python -m scripts.drift_detector --apply-mode=auto-additive --ontology_dir=ontology --instance=ontology-demo --database=ontology-db
+        python -m scripts.drift_detector \
+          --apply-mode=auto-additive \
+          --project=migiration-demo \
+          --instance=ontology-demo \
+          --database=ontology-db
         echo "✅ Drift detection complete."
 
   # 4. Apply Additive Schema Evolution to Spanner
@@ -71,7 +75,12 @@ steps:
         export PYTHONPATH=/workspace
         pip install -r requirements.txt -q
         echo "=== Step 4: Applying additive schema evolution to Spanner ==="
-        python -m scripts.drift_detector --apply-mode=auto-additive --apply --ontology_dir=ontology --instance=ontology-demo --database=ontology-db
+        python -m scripts.drift_detector \
+          --apply-mode=auto-additive \
+          --apply \
+          --project=migiration-demo \
+          --instance=ontology-demo \
+          --database=ontology-db
         echo "✅ Schema evolution applied to Spanner."
 
   # 5. Terraform Apply
