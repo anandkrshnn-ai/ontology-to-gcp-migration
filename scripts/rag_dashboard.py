@@ -719,59 +719,172 @@ with tab1:
 
 
 
-# TAB 2: Ingestion Zone - FIX
+# TAB 2: Ingestion Zone - FIXED FOR SIMULATED MODE
 with tab2:
-    st.markdown("### Telemetry Data Library & Extraction Zone (Future Development)")
-    st.info("🚧 **Roadmap Item:** This module will handle real-time unstructured log ingestion and vector embeddings in Phase 2.")
+    st.markdown("### Telemetry Data Library & Extraction Zone")
+    st.info("🚧 **Current Mode:** Running with MockVectorStore (simulated embeddings). Switch to Live Mode in sidebar to use Vertex AI.")
     
-    # Initialize vector store properly
+    # Initialize vector store with better error handling
     if "vector_store" not in st.session_state:
         try:
             if is_live:
-                st.session_state.vector_store = VertexAIVectorStore(project=spanner_project, location="us-central1")
+                try:
+                    st.session_state.vector_store = VertexAIVectorStore(project=spanner_project, location="us-central1")
+                    st.session_state.using_vertex_ai = True
+                except Exception as vertex_err:
+                    st.warning(f"⚠️ Vertex AI initialization failed: {vertex_err}")
+                    st.info("Falling back to MockVectorStore for demonstration purposes.")
+                    st.session_state.vector_store = MockVectorStore()
+                    st.session_state.using_vertex_ai = False
             else:
                 st.session_state.vector_store = MockVectorStore()
+                st.session_state.using_vertex_ai = False
         except Exception as e:
             st.error(f"Failed to initialize vector store: {e}")
-            # Fallback to mock
             st.session_state.vector_store = MockVectorStore()
+            st.session_state.using_vertex_ai = False
+    
+    # Show which backend is active
+    backend_status = "Vertex AI 🔵" if st.session_state.using_vertex_ai else "MockVectorStore 🟡"
+    st.caption(f"**Vector Store Backend:** {backend_status}")
     
     col_ing1, col_ing2 = st.columns(2)
     
     with col_ing1:
         st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.subheader("Current Unstructured Documents")
-        if st.session_state.vector_store.documents:
-            for doc in st.session_state.vector_store.documents:
-                st.markdown(f"**{doc['id']}** ({doc['entities'].get('node_id') or doc['entities'].get('segment_id') or list(doc['entities'].keys())[0]} target)")
-                st.info(doc['text'])
+        st.subheader("📚 Current Unstructured Documents")
+        
+        if st.session_state.vector_store and hasattr(st.session_state.vector_store, 'documents'):
+            if st.session_state.vector_store.documents:
+                for idx, doc in enumerate(st.session_state.vector_store.documents):
+                    # Extract entity type safely
+                    entity_info = doc.get('entities', {})
+                    entity_key = next(iter(entity_info.keys())) if entity_info else "unknown"
+                    entity_val = next(iter(entity_info.values())) if entity_info else "N/A"
+                    
+                    with st.expander(f"**{doc['id']}** → `{entity_val}`", expanded=(idx == 0)):
+                        st.caption(f"Entity Type: `{entity_key}`")
+                        st.info(doc['text'])
+                        st.caption(f"📊 Embeddings: {'Real (Vertex AI)' if st.session_state.using_vertex_ai else 'Simulated (768-dim random)'}")
+            else:
+                st.warning("⚠️ No documents in vector store.")
         else:
-            st.warning("No documents in vector store.")
+            st.error("Vector store not initialized properly.")
+        
         st.markdown("</div>", unsafe_allow_html=True)
         
     with col_ing2:
         st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.subheader("Add New Telemetry / Maintenance Logs")
-        new_id = st.text_input("Document ID:", value="doc_chunk_4")
-        new_text = st.text_area("Log Content:", value="Operational Note: Emergency fuel transfers completed at Dallas Segment.")
-        target_entity = st.selectbox("Link to Entity:", ["network_routing", "network_routing_segment"])
+        st.subheader("➕ Add New Telemetry / Maintenance Log")
         
-        if st.button("Index Document"):
-            if not new_id or not new_text:
-                st.error("Document ID and Content are required.")
-            else:
-                try:
-                    with st.spinner("Embedding document..."):
-                        new_doc = {
-                            "id": new_id,
-                            "text": new_text,
-                            "entities": {target_entity: target_entity}
-                        }
-                        st.session_state.vector_store.add_document(new_doc)
-                    st.success(f"Successfully chunked and indexed {new_id} to Vector Search.")
-                except Exception as e:
-                    st.error(f"Failed to index document: {e}")
+        new_id = st.text_input("Document ID:", value="doc_chunk_4", key="doc_id_input")
+        new_text = st.text_area(
+            "Log Content:", 
+            value="Operational Note: Emergency fuel transfers completed at Dallas Segment.",
+            height=100,
+            key="doc_content_input"
+        )
+        target_entity = st.selectbox(
+            "Link to Entity:", 
+            ["network_routing", "network_routing_segment", "routing_id", "segment_id"],
+            key="entity_select"
+        )
+        
+        col_btn1, col_btn2 = st.columns(2)
+        
+        with col_btn1:
+            if st.button("🔐 Index Document", use_container_width=True):
+                if not new_id or not new_text:
+                    st.error("❌ Document ID and Content are required.")
+                elif len(new_id) > 50:
+                    st.error("❌ Document ID too long (max 50 chars).")
+                else:
+                    try:
+                        with st.spinner("⏳ Embedding document..."):
+                            new_doc = {
+                                "id": new_id,
+                                "text": new_text,
+                                "entities": {target_entity: target_entity}
+                            }
+                            st.session_state.vector_store.add_document(new_doc)
+                        
+                        st.success(f"✔️ Successfully indexed `{new_id}` to Vector Search!")
+                        st.caption(f"Backend: {backend_status}")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Failed to index document: {e}")
+        
+        with col_btn2:
+            if st.button("🗑️ Clear All Documents", use_container_width=True):
+                if st.session_state.vector_store:
+                    st.session_state.vector_store.documents = []
+                    st.session_state.vector_store.embeddings = {}
+                    st.success("✔️ All documents cleared!")
+                    st.rerun()
+        
+        st.markdown("---")
+        st.markdown("**ℹ️ Tips:**")
+        st.caption(
+            "- Documents are embedded using cosine similarity\n"
+            "- In **Live Mode** with Vertex AI enabled, real embeddings are generated\n"
+            "- In **Simulated Mode**, random 768-dim vectors are used\n"
+            "- Use documents to provide context for GraphRAG queries (Tab 3)"
+        )
+        
         st.markdown("</div>", unsafe_allow_html=True)
+
+    # VECTOR STORE STATISTICS
+    st.markdown("---")
+    col_stat1, col_stat2, col_stat3 = st.columns(3)
+    
+    with col_stat1:
+        if st.session_state.vector_store and hasattr(st.session_state.vector_store, 'documents'):
+            st.metric(label="Total Documents", value=len(st.session_state.vector_store.documents))
+    
+    with col_stat2:
+        if st.session_state.vector_store and hasattr(st.session_state.vector_store, 'embeddings'):
+            st.metric(label="Indexed Embeddings", value=len(st.session_state.vector_store.embeddings))
+    
+    with col_stat3:
+        st.metric(label="Embedding Dimension", value="768")
+    
+    # TEST SEMANTIC SEARCH
+    st.markdown("---")
+    st.subheader("🔍 Test Semantic Search")
+    test_query = st.text_input(
+        "Enter a test query:",
+        value="What operational issues affect Chicago Hub?",
+        key="search_query"
+    )
+    
+    if st.button("Search Documents", use_container_width=True):
+        if not test_query:
+            st.error("❌ Please enter a search query.")
+        else:
+            try:
+                with st.spinner("⏳ Searching..."):
+                    results = st.session_state.vector_store.semantic_search(test_query, top_k=2)
+                
+                if results:
+                    st.success(f"✔️ Found {len(results)} matching document(s)")
+                    for idx, result in enumerate(results, 1):
+                        doc = result["document"]
+                        score = result["score"]
+                        
+                        col_result_text, col_result_score = st.columns([3, 1])
+                        with col_result_text:
+                            st.markdown(f"**#{idx} {doc['id']}**")
+                            st.info(doc['text'])
+                        with col_result_score:
+                            st.metric(
+                                "Similarity",
+                                f"{score:.3f}",
+                                delta="Match ✓" if score > 0.5 else "Partial"
+                            )
+                else:
+                    st.warning("⚠️ No documents found.")
+            except Exception as e:
+                st.error(f"❌ Search failed: {e}")
 
 
 
