@@ -1413,7 +1413,7 @@ with tab5:
     
     traversal_mode = st.radio(
         "Traversal mode:",
-        ["SQL Traversal (current)", "GQL Traversal (LogisticsGraph, beta)"],
+        ["SQL Traversal (current)"],
         index=0,
         key="graph_traversal_mode",
     )
@@ -1464,18 +1464,14 @@ with tab5:
             try:
                 _update_progress(0.1, "Loading live Spanner data...")
                 
-                if traversal_mode.startswith("GQL"):
-                    _update_progress(0.3, "Executing GQL query...")
-                    nodes_res, edges_res = fetch_graph_data_gql(registry_manager.spanner_db)
-                else:
-                    _update_progress(0.2, "Loading ontology config...")
-                    config = load_ontology_graph_config(st.session_state.yamls)
-                    
-                    _update_progress(0.3, "Fetching graph data from Spanner...")
-                    # Directly fetch without checking schema (avoids timeout)
-                    try:
-                        nodes_res, edges_res = fetch_graph_data(config, registry_manager.spanner_db)
-                    except Exception as fetch_err:
+                _update_progress(0.2, "Loading ontology config...")
+                config = load_ontology_graph_config(st.session_state.yamls)
+                
+                _update_progress(0.3, "Fetching graph data from Spanner...")
+                # Directly fetch without checking schema (avoids timeout)
+                try:
+                    nodes_res, edges_res = fetch_graph_data(config, registry_manager.spanner_db)
+                except Exception as fetch_err:
                         if "no such table" in str(fetch_err).lower():
                             st.warning("⚠️ Views don't exist in Spanner yet")
                             st.info("Deploy ontology in Tab 1 first")
