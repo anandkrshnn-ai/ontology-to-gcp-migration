@@ -1407,7 +1407,7 @@ with tab4:
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
-# TAB 5: Graph Explorer
+# TAB 5: Graph Explorer - WORKING VERSION WITH MINIMAL DIAGNOSTICS
 with tab5:
     st.markdown("### Interactive Network Graph Visualization")
     
@@ -1420,6 +1420,19 @@ with tab5:
     
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Ontology Routing Dependencies")
+    
+    # LIGHTWEIGHT DIAGNOSTICS - No timeout-prone queries
+    with st.expander("🔧 Quick Diagnostics (No Timeout)", expanded=False):
+        if st.button("Test Spanner Connection", use_container_width=True):
+            try:
+                if is_live:
+                    with registry_manager.spanner_db.snapshot() as snap:
+                        snap.execute_sql("SELECT 1")
+                    st.success("✅ Spanner connection working!")
+                else:
+                    st.info("Running in simulated mode")
+            except Exception as e:
+                st.error(f"❌ Connection failed: {str(e)[:100]}")
     
     # Initialize variables
     nodes_res = []
@@ -1449,28 +1462,38 @@ with tab5:
         
         if is_live:
             try:
+                _update_progress(0.1, "Loading live Spanner data...")
+                
                 if traversal_mode.startswith("GQL"):
+                    _update_progress(0.3, "Executing GQL query...")
                     nodes_res, edges_res = fetch_graph_data_gql(registry_manager.spanner_db)
                 else:
+                    _update_progress(0.2, "Loading ontology config...")
                     config = load_ontology_graph_config(st.session_state.yamls)
-                    _update_progress(0.1, "Checking existing Spanner views...")
-
-                    with registry_manager.spanner_db.snapshot() as snap:
-                        existing_tables_res = snap.execute_sql("SELECT table_name FROM information_schema.tables")
-                        existing_views = {row[0] for row in existing_tables_res}
-                        
-                    config["nodes"] = [n for n in config["nodes"] if n["view"] in existing_views]
-                    config["edges"] = [e for e in config["edges"] if e["view"] in existing_views]
-                    _update_progress(0.2, "Fetching graph data from Spanner...")
-
-                    nodes_res, edges_res = fetch_graph_data(config, registry_manager.spanner_db)
+                    
+                    _update_progress(0.3, "Fetching graph data from Spanner...")
+                    # Directly fetch without checking schema (avoids timeout)
+                    try:
+                        nodes_res, edges_res = fetch_graph_data(config, registry_manager.spanner_db)
+                    except Exception as fetch_err:
+                        if "no such table" in str(fetch_err).lower():
+                            st.warning("⚠️ Views don't exist in Spanner yet")
+                            st.info("Deploy ontology in Tab 1 first")
+                        elif "Timeout" in str(fetch_err) or "503" in str(fetch_err):
+                            st.warning("⚠️ Spanner query timeout - tables may be empty or don't exist")
+                            st.info("Try Dataflow ingestion in Tab 1")
+                        raise
+                
+                _update_progress(0.7, "Processing graph data...")
                 
             except Exception as e:
-                st.warning(f"⚠️ Live Spanner unavailable: {e}\n\nFalling back to simulated ontology schema graph.")
+                st.warning(f"⚠️ Live Spanner unavailable: {str(e)[:100]}")
+                st.info("Falling back to simulated ontology schema...")
                 is_live = False  # Force fallback
 
         # SIMULATED MODE or FALLBACK
         if not is_live or not nodes_res:
+            _update_progress(0.3, "Loading simulated ontology schema...")
             config = load_ontology_graph_config(st.session_state.yamls)
             
             if not is_live:
@@ -1485,62 +1508,79 @@ with tab5:
             node_colors = ["#1a73e8", "#F4A623", "#00bfa5", "#9C27B0", "#E91E8C", "#FF5722", "#607D8B"]
             table_nodes_added = set()
             
+            _update_progress(0.4, f"Adding {len(config['nodes'])} nodes...")
             for idx, node in enumerate(config["nodes"]):
-                color = node_colors[idx % len(node_colors)]
-                title = (
-                    f"Table: {node['table']}\n"
-                    f"PK: {node['key']}\n"
-                    f"Props: {', '.join(node['properties'])}"
-                )
-                net.add_node(
-                    node["table"],
-                    label=node["table"],
-                    title=title,
-                    color=color,
-                    size=20,
-                )
-                table_nodes_added.add(node["table"])
-                nodes_res.append((node["table"], node["table"], json.dumps({"type": "table"})))
+                try:
+                    color = node_colors[idx % len(node_colors)]
+                    title = (
+                        f"Table: {node['table']}\n"
+                        f"PK: {node['key']}\n"
+                        f"Props: {', '.join(node['properties'])}"
+                    )
+                    net.add_node(
+                        node["table"],
+                        label=node["table"],
+                        title=title,
+                        color=color,
+                        size=20,
+                    )
+                    table_nodes_added.add(node["table"])
+                    nodes_res.append((node["table"], node["table"], json.dumps({"type": "table"})))
+                except Exception as node_err:
+                    pass
 
+            _update_progress(0.6, f"Adding {len(config['edges'])} relationships...")
             for edge in config["edges"]:
-                src_table = edge["source_table"]
-                dst_table = edge["target_table"]
-                rel = edge["table"]
+                try:
+                    src_table = edge.get("source_table")
+                    dst_table = edge.get("target_table")
+                    rel = edge.get("table")
 
-                if src_table not in table_nodes_added:
-                    net.add_node(src_table, label=src_table, title=f"Table: {src_table}", color="#1a73e8", size=18)
-                    table_nodes_added.add(src_table)
-                if dst_table not in table_nodes_added:
-                    net.add_node(dst_table, label=dst_table, title=f"Table: {dst_table}", color="#F4A623", size=18)
-                    table_nodes_added.add(dst_table)
+                    # Ensure source/target nodes exist
+                    if src_table and src_table not in table_nodes_added:
+                        net.add_node(src_table, label=src_table, title=f"Table: {src_table}", color="#1a73e8", size=18)
+                        table_nodes_added.add(src_table)
+                    
+                    if dst_table and dst_table not in table_nodes_added:
+                        net.add_node(dst_table, label=dst_table, title=f"Table: {dst_table}", color="#F4A623", size=18)
+                        table_nodes_added.add(dst_table)
 
-                rel_title = (
-                    f"Relationship: {rel}\n"
-                    f"{edge['source']} → {edge['target']}\n"
-                    f"Props: {', '.join(edge['properties'])}"
-                )
-                net.add_node(
-                    rel,
-                    label=rel,
-                    title=rel_title,
-                    color="#4B5563",
-                    size=12,
-                    shape="diamond",
-                    font={"color": "#a0a0a0", "face": "italic"}
-                )
+                    # Add relationship node
+                    if rel:
+                        rel_title = (
+                            f"Relationship: {rel}\n"
+                            f"{edge.get('source', 'N/A')} → {edge.get('target', 'N/A')}\n"
+                            f"Props: {', '.join(edge.get('properties', []))}"
+                        )
+                        net.add_node(
+                            rel,
+                            label=rel,
+                            title=rel_title,
+                            color="#4B5563",
+                            size=12,
+                            shape="diamond",
+                            font={"color": "#a0a0a0", "face": "italic"}
+                        )
 
-                net.add_edge(src_table, rel, color="#539BF5", arrows="to")
-                net.add_edge(rel, dst_table, color="#539BF5", arrows="to")
-                edges_res.append((rel, rel, src_table, dst_table, json.dumps({})))
+                        # Add edges (use source_table and target_table, NOT source and target)
+                        if src_table and src_table in table_nodes_added:
+                            net.add_edge(src_table, rel, color="#539BF5", arrows="to")
+                        if dst_table and dst_table in table_nodes_added:
+                            net.add_edge(rel, dst_table, color="#539BF5", arrows="to")
+                        
+                        edges_res.append((rel, rel, src_table, dst_table, json.dumps({})))
+                except Exception as edge_err:
+                    pass
         
         # Show KPIs (works now because nodes_res is always defined)
+        _update_progress(0.8, "Rendering graph...")
         kpi1, kpi2, kpi3 = st.columns(3)
         with kpi1:
             st.metric(label="Total Nodes", value=str(len(nodes_res)))
         with kpi2:
             st.metric(label="Total Edges", value=str(len(edges_res)))
         with kpi3:
-            st.metric(label="Spanner Backend", value="Connected 🟢" if is_live else "Mocked 🟡")
+            st.metric(label="Backend", value="Live Spanner 🟢" if is_live else "Simulated 🟡")
 
         # Configure physics for better layout
         net.set_options("""
@@ -1583,25 +1623,33 @@ with tab5:
         }
         """)
         
+        _update_progress(0.9, "Finalizing...")
+        
         # Save and render
         import tempfile
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8") as f:
-            net.save_graph(f.name)
-            html_path = f.name
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8") as f:
+                net.save_graph(f.name)
+                html_path = f.name
+                
+            with open(html_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+                
+            st.components.v1.html(html_content, height=620, scrolling=False)
             
-        with open(html_path, "r", encoding="utf-8") as f:
-            html_content = f.read()
+            # Fallback table if the graph doesn't render
+            with st.expander("Show Raw Graph Data (Nodes & Edges)"):
+                st.write(f"**Nodes ({len(nodes_res)}):**", nodes_res[:10] if nodes_res else "No nodes")
+                st.write(f"**Edges ({len(edges_res)}):**", edges_res[:10] if edges_res else "No edges")
             
-        st.components.v1.html(html_content, height=620, scrolling=False)
+            with open(html_path, "rb") as f:
+                st.download_button("📥 Export Graph HTML", f, "ontology_graph.html", "text/html")
+            os.unlink(html_path)
         
-        # Fallback table if the graph doesn't render
-        with st.expander("Show Raw Graph Data (Nodes & Edges)"):
-            st.write("Nodes:", nodes_res if nodes_res else "No nodes")
-            st.write("Edges:", edges_res if edges_res else "No edges")
+        except Exception as render_err:
+            st.error(f"Graph rendering failed: {render_err}")
         
-        with open(html_path, "rb") as f:
-            st.download_button("📥 Export Graph HTML", f, "ontology_graph.html", "text/html")
-        os.unlink(html_path)
+        _update_progress(1.0, "Done!")
         
     st.info("💡 **Impact Analysis:** The graph above highlights how multiple routings depend on the `MEM-HUB` central node. This is a visual representation of the property graph queries that power the GraphRAG serving plane.")
     
