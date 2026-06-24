@@ -888,54 +888,92 @@ with tab2:
 
 
 
-# TAB 3: GraphRAG Serving - FIX
+# TAB 3: GraphRAG Serving - COMPLETE FIXED VERSION
 with tab3:
-    st.markdown("### Interactive Graph-Backed Retrieval (GraphRAG) - Future Development")
-    st.info("🚧 **Roadmap Item:** The Serving Plane demonstrating Gemini 1.5 Synthesis and Spanner Graph expansions will be finalized in Phase 2.")
+    st.markdown("### Interactive Graph-Backed Retrieval (GraphRAG)")
+    st.info("🚀 **Real-time demonstration:** Combines semantic search + graph traversal + LLM synthesis")
     
     st.markdown("<div class='card'>", unsafe_allow_html=True)
     st.subheader("Ask the Serving Plane")
     
     sample_queries = [
         "Why is operational capacity degraded at the Chicago Hub, and what is the transit mode to its segments?",
-        "What segments connect to Chicago Logistics Hub?"
+        "What segments connect to Chicago Logistics Hub?",
+        "Which routes are affected by power fluctuations at OAK-STN?",
+        "What is the status of maintenance logs?"
     ]
-    query_input = st.selectbox("Select a sample query or write your own below:", sample_queries)
-    custom_query = st.text_input("Your Custom Query:", value="")
     
-    active_query = custom_query if custom_query else query_input
+    col_query_select, col_query_custom = st.columns([1, 1])
     
-    if st.button("Run GraphRAG Retriever"):
+    with col_query_select:
+        query_input = st.selectbox("Sample Query:", sample_queries, key="sample_query_select")
+    
+    with col_query_custom:
+        custom_query = st.text_input("Or Enter Custom Query:", value="", key="custom_query_input", placeholder="Your question here...")
+    
+    active_query = custom_query if custom_query.strip() else query_input
+    
+    if st.button("▶️ Run GraphRAG Retriever", use_container_width=True):
         try:
-            # 1. Semantic Search
-            st.markdown("<div class='step-header'>Step 1: Semantic Document Retrieval</div>", unsafe_allow_html=True)
-            with st.spinner("Executing similarity search over indexed chunks..."):
+            # STEP 1: Semantic Search
+            st.markdown("<div class='step-header'>📄 Step 1: Semantic Document Retrieval</div>", unsafe_allow_html=True)
+            
+            with st.spinner("⏳ Executing similarity search over indexed chunks..."):
                 # Initialize vector store if needed
                 if "vector_store" not in st.session_state:
-                    if is_live:
-                        st.session_state.vector_store = VertexAIVectorStore(project=spanner_project, location="us-central1")
-                    else:
+                    try:
+                        if is_live:
+                            st.session_state.vector_store = VertexAIVectorStore(project=spanner_project, location="us-central1")
+                            st.session_state.using_vertex_ai = True
+                        else:
+                            st.session_state.vector_store = MockVectorStore()
+                            st.session_state.using_vertex_ai = False
+                    except Exception as vs_err:
+                        st.warning(f"Vector store init failed: {vs_err}")
                         st.session_state.vector_store = MockVectorStore()
+                        st.session_state.using_vertex_ai = False
                 
-                results = st.session_state.vector_store.semantic_search(active_query, top_k=1)
-                if not results:
-                    st.error("No documents found for semantic search.")
+                # Perform semantic search
+                try:
+                    results = st.session_state.vector_store.semantic_search(active_query, top_k=2)
+                    if not results:
+                        st.warning("⚠️ No documents matched the query. Using default context...")
+                        # Use first document as fallback
+                        if st.session_state.vector_store.documents:
+                            matched = st.session_state.vector_store.documents[0]
+                            score = 0.0
+                        else:
+                            raise ValueError("No documents in vector store")
+                    else:
+                        matched = results[0]["document"]
+                        score = results[0]["score"]
+                except Exception as search_err:
+                    st.error(f"❌ Semantic search failed: {search_err}")
                     st.stop()
                 
-                matched = results[0]["document"]
-                score = results[0]["score"]
-                st.write(f"Matched Document ID: `{matched['id']}` (Cosine Similarity: `{score:.4f}`)")
-                st.info(matched["text"])
-                
-            # 2. Spanner Graph Expansion
-            st.markdown("<div class='step-header'>Step 2: Spanner Graph Path Expansion</div>", unsafe_allow_html=True)
-            with st.spinner("Traversing Spanner Graph paths..."):
-                graph_expansion = None
-                
+                # Display matched document
+                col_match_doc, col_match_score = st.columns([3, 1])
+                with col_match_doc:
+                    st.write(f"**Matched:** `{matched['id']}`")
+                    st.info(matched["text"])
+                with col_match_score:
+                    st.metric("Similarity", f"{score:.3f}", delta="Strong match ✓" if score > 0.6 else "Moderate")
+            
+            # STEP 2: Spanner Graph Expansion
+            st.markdown("<div class='step-header'>🔗 Step 2: Spanner Graph Path Expansion</div>", unsafe_allow_html=True)
+            
+            graph_expansion = None
+            
+            with st.spinner("⏳ Traversing Spanner Graph paths..."):
                 if not is_live:
                     # Simulated query expansion
-                    graph_db = SpannerGraphSimulator()
-                    graph_expansion = graph_db.execute_graph_expansion("NR-001")
+                    try:
+                        graph_db = SpannerGraphSimulator()
+                        graph_expansion = graph_db.execute_graph_expansion("NR-001")
+                        st.caption("📌 Using simulated graph (not connected to live Spanner)")
+                    except Exception as sim_err:
+                        st.error(f"❌ Graph simulator failed: {sim_err}")
+                        graph_expansion = None
                 else:
                     # Real Spanner Graph query execution
                     try:
@@ -949,9 +987,10 @@ with tab3:
                               s.transport_mode,
                               s.weight
                             FROM v_network_routing r
-                            JOIN v_network_routing_segment s ON s.routing_id = r.routing_id
+                            LEFT JOIN v_network_routing_segment s ON s.routing_id = r.routing_id
                             WHERE r.routing_id = @routing_id
                             ORDER BY s.segment_id
+                            LIMIT 10
                             """
                             results = snapshot.execute_sql(
                                 sql_query,
@@ -960,147 +999,413 @@ with tab3:
                             )
                             rows = list(results)
                             
-                            st.caption("💡 Graph context retrieved via relational traversal (SQL JOIN).")
+                            st.caption("💡 Graph context retrieved via SQL traversal (Spanner Standard)")
                             
                             if rows:
                                 graph_expansion = {
                                     "start_node": {
                                         "id": "NR-001",
-                                        "details": {"routing_id": rows[0][0], "service_commit": rows[0][1]}
+                                        "details": {
+                                            "routing_id": rows[0][0],
+                                            "service_commit": rows[0][1]
+                                        }
                                     },
                                     "connections": [{
-                                        "target_segment_id": row[2],
-                                        "transport_mode": row[3],
-                                        "weight": row[4],
+                                        "target_segment_id": row[2] if row[2] else "N/A",
+                                        "transport_mode": row[3] if row[3] else "N/A",
+                                        "weight": row[4] if row[4] else "N/A",
                                         "segment_details": {"status": "ACTIVE"}
-                                    } for row in rows]
+                                    } for row in rows if row[2]]  # Filter out None segment_ids
                                 }
                             else:
-                                st.warning("⚠️ No Spanner records. Falling back to simulation...")
+                                st.warning("⚠️ No live Spanner records. Using simulated fallback...")
                                 graph_db = SpannerGraphSimulator()
                                 graph_expansion = graph_db.execute_graph_expansion("NR-001")
-                    except Exception as ge:
-                        st.warning(f"Spanner query failed: {ge}. Using simulated data...")
-                        graph_db = SpannerGraphSimulator()
-                        graph_expansion = graph_db.execute_graph_expansion("NR-001")
-                
-                if graph_expansion:
-                    col_gr1, col_gr2 = st.columns(2)
-                    with col_gr1:
-                        st.markdown("**Starting Graph Node (NetworkRouting)**")
-                        st.write(graph_expansion["start_node"]["details"])
-                    with col_gr2:
-                        st.markdown("**Traversed Edge Links (HAS_SEGMENT -> NetworkRoutingSegment)**")
-                        st.write(graph_expansion["connections"])
-                else:
-                    st.error("Failed to retrieve graph expansion.")
                     
-            # 3. Context Integration & Generation
-            st.markdown("<div class='step-header'>Step 3: Answer Ingestion & Synthesis</div>", unsafe_allow_html=True)
+                    except Exception as spanner_err:
+                        st.warning(f"⚠️ Live Spanner query failed: {spanner_err}")
+                        st.info("Falling back to simulated graph...")
+                        try:
+                            graph_db = SpannerGraphSimulator()
+                            graph_expansion = graph_db.execute_graph_expansion("NR-001")
+                        except Exception as fallback_err:
+                            st.error(f"❌ Graph expansion completely failed: {fallback_err}")
+                            graph_expansion = None
             
+            # Display graph expansion results
             if graph_expansion:
-                context_payload = (
-                    f"--- SYSTEM MIGRATION CONTEXT EVIDENCE ---\n"
-                    f"Unstructured Log Evidence:\n{matched['text']}\n\n"
-                    f"Structured Spanner Graph Traversal:\n"
-                    f"- Starting Route Node: {graph_expansion['start_node']['id']} (Commitment: {graph_expansion['start_node']['details'].get('service_commit', 'N/A')})\n"
-                    f"- Connected Segment: {graph_expansion['connections'][1]['target_segment_id'] if len(graph_expansion['connections']) > 1 else 'N/A'} (Transport Mode: {graph_expansion['connections'][1].get('transport_mode', 'N/A') if len(graph_expansion['connections']) > 1 else 'N/A'})\n"
+                col_gr1, col_gr2 = st.columns(2)
+                with col_gr1:
+                    st.markdown("**🟢 Starting Node (NetworkRouting)**")
+                    with st.expander("Show Details", expanded=True):
+                        st.json(graph_expansion["start_node"]["details"])
+                
+                with col_gr2:
+                    st.markdown("**🔗 Connected Edges (HAS_SEGMENT)**")
+                    with st.expander(f"Show {len(graph_expansion.get('connections', []))} Connections", expanded=True):
+                        if graph_expansion.get("connections"):
+                            for conn in graph_expansion["connections"]:
+                                st.json(conn)
+                        else:
+                            st.info("No connections found")
+            else:
+                st.error("❌ Graph expansion failed - cannot proceed with synthesis")
+                st.stop()
+            
+            # STEP 3: Context Integration & Generation
+            st.markdown("<div class='step-header'>✨ Step 3: Answer Synthesis</div>", unsafe_allow_html=True)
+            
+            # Build context payload
+            context_payload = (
+                f"--- MIGRATION CONTEXT EVIDENCE ---\n\n"
+                f"**Unstructured Evidence:**\n{matched['text']}\n\n"
+                f"**Structured Graph Traversal:**\n"
+                f"- Route: {graph_expansion['start_node']['id']}\n"
+                f"- Commitment: {graph_expansion['start_node']['details'].get('service_commit', 'N/A')}\n"
+            )
+            
+            if graph_expansion.get("connections"):
+                context_payload += f"- Connected Segments: {len(graph_expansion['connections'])}\n"
+                for i, conn in enumerate(graph_expansion["connections"][:3], 1):
+                    context_payload += (
+                        f"  #{i}: {conn.get('target_segment_id', 'N/A')} "
+                        f"({conn.get('transport_mode', 'N/A')}) - Status: {conn.get('segment_details', {}).get('status', 'UNKNOWN')}\n"
+                    )
+            
+            with st.expander("📋 Show Assembled Context Window"):
+                st.text(context_payload)
+            
+            st.markdown("**🤖 Synthesized Answer:**")
+            
+            # Try to get LLM synthesis
+            synthesis_failed = False
+            
+            if is_live:
+                # Try Vertex AI first
+                try:
+                    with st.spinner("⏳ Calling Vertex AI (Gemini 1.5)..."):
+                        vertexai.init(project=spanner_project, location="us-central1")
+                        
+                        prompt = (
+                            f"You are a helpful logistics and infrastructure database assistant.\n"
+                            f"Answer the user's question using ONLY the provided context.\n"
+                            f"Be concise and factual.\n\n"
+                            f"Context:\n{context_payload}\n\n"
+                            f"Question: {active_query}\n\n"
+                            f"Answer:"
+                        )
+                        
+                        try:
+                            model = GenerativeModel("gemini-1.5-flash-001")
+                            response = model.generate_content(prompt, stream=False)
+                            st.success(response.text)
+                        except Exception as gemini_flash_err:
+                            # Fallback to gemini-pro
+                            st.caption("(Using Gemini 1.0 Pro as fallback)")
+                            model = GenerativeModel("gemini-1.0-pro-001")
+                            response = model.generate_content(prompt, stream=False)
+                            st.success(response.text)
+                
+                except Exception as vertex_err:
+                    st.warning(f"⚠️ Vertex AI unavailable: {vertex_err}")
+                    synthesis_failed = True
+            
+            elif gemini_key:
+                # Use Gemini API Key from sidebar
+                try:
+                    with st.spinner("⏳ Calling Gemini API..."):
+                        import google.generativeai as genai
+                        genai.configure(api_key=gemini_key)
+                        model = genai.GenerativeModel('gemini-1.5-flash-001')
+                        
+                        prompt = (
+                            f"You are a helpful logistics and infrastructure database assistant.\n"
+                            f"Answer the user's question using ONLY the provided context.\n"
+                            f"Be concise and factual.\n\n"
+                            f"Context:\n{context_payload}\n\n"
+                            f"Question: {active_query}\n\n"
+                            f"Answer:"
+                        )
+                        
+                        response = model.generate_content(prompt)
+                        st.success(response.text)
+                
+                except Exception as gemini_err:
+                    st.warning(f"⚠️ Gemini API failed: {gemini_err}")
+                    synthesis_failed = True
+            
+            else:
+                synthesis_failed = True
+            
+            # Fallback static answer if LLM synthesis failed
+            if synthesis_failed:
+                st.info("💡 LLM synthesis unavailable. Using template answer...")
+                
+                fallback_answer = (
+                    f"Based on the combined evidence from unstructured logs and graph traversal:\n\n"
+                    f"**Key Finding:** {matched['id']} indicates operational issues in the system.\n\n"
+                    f"**Graph Context:** The route {graph_expansion['start_node']['id']} has a service commitment of "
+                    f"{graph_expansion['start_node']['details'].get('service_commit', 'N/A')}.\n\n"
                 )
                 
-                with st.expander("Show Assembled Context Window Payload"):
-                    st.text(context_payload)
-                    
-                st.markdown("**Synthesized Answer:**")
+                if graph_expansion.get("connections"):
+                    fallback_answer += (
+                        f"**Connected Infrastructure:** This route connects to {len(graph_expansion['connections'])} "
+                        f"segments via {', '.join(set(c.get('transport_mode', 'N/A') for c in graph_expansion['connections']))} transport.\n\n"
+                    )
                 
-                if is_live:
-                    with st.spinner("Synthesizing answer..."):
-                        try:
-                            vertexai.init(project=spanner_project, location="us-central1")
-                            prompt = (
-                                f"You are a helpful logistics assistant. Answer using ONLY the provided contexts.\n\n"
-                                f"Context:\n{context_payload}\n\n"
-                                f"Query: {active_query}\n\nAnswer:"
-                            )
-                            try:
-                                model = GenerativeModel("gemini-1.5-flash-001")
-                                response = model.generate_content(prompt)
-                                st.success(response.text)
-                            except Exception:
-                                model = GenerativeModel("gemini-1.0-pro-001")
-                                response = model.generate_content(prompt)
-                                st.success(response.text)
-                        except Exception as vertex_err:
-                            st.warning("Vertex AI unavailable. Using fallback...")
-                            st.success("Based on the evidence provided, the system is operational.")
-                elif gemini_key:
-                    with st.spinner("Synthesizing answer using Gemini..."):
-                        try:
-                            import google.generativeai as genai
-                            genai.configure(api_key=gemini_key)
-                            model = genai.GenerativeModel('gemini-1.5-flash-001')
-                            
-                            prompt = (
-                                f"You are a helpful logistics assistant. Answer using ONLY the provided contexts.\n\n"
-                                f"Context:\n{context_payload}\n\n"
-                                f"Query: {active_query}\n\nAnswer:"
-                            )
-                            response = model.generate_content(prompt)
-                            st.success(response.text)
-                        except Exception as gemini_err:
-                            st.warning(f"Gemini API failed: {gemini_err}. Using fallback...")
-                            st.success("Based on the evidence provided, the system is operational.")
-                else:
-                    st.info("💡 Provide Gemini API Key in sidebar to enable live synthesis.")
-                    st.success("Based on the evidence provided, the system is operational.")
-        except Exception as e:
-            st.error(f"GraphRAG pipeline failed: {e}")
-            
+                fallback_answer += "**Recommendation:** Review the operational logs and graph structure for detailed impact analysis."
+                
+                st.success(fallback_answer)
+        
+        except Exception as pipeline_err:
+            st.error(f"❌ GraphRAG pipeline failed: {pipeline_err}")
+            with st.expander("Show Error Details"):
+                st.code(str(pipeline_err))
+    
     st.markdown("</div>", unsafe_allow_html=True)
 
 
-
-# TAB 4: Governance & Audit - FIX
+# TAB 4: Governance & Audit - COMPLETE FIXED VERSION
 with tab4:
-    st.markdown("### Governance & Compliance Logs")
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.subheader("Dataflow Rule Audit Logs")
-    st.info("💡 Shows results of YAML rules evaluated during Dataflow ingestion.")
+    st.markdown("### Governance & Compliance Audit Logs")
+    st.info("📊 **Real-time audit trail:** Tracks all rule evaluations and data validation during ingestion")
     
-    if st.button("Query Rule Audit Table"):
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("🔍 Dataflow Rule Audit Logs")
+    st.caption("Shows results of YAML validation rules evaluated against incoming telemetry data")
+    
+    col_audit_filter1, col_audit_filter2 = st.columns(2)
+    
+    with col_audit_filter1:
+        audit_status_filter = st.multiselect(
+            "Filter by Status:",
+            options=["PASS", "FAIL", "WARN"],
+            default=["PASS", "FAIL"],
+            key="audit_status"
+        )
+    
+    with col_audit_filter2:
+        audit_limit = st.slider(
+            "Max Records to Show:",
+            min_value=10,
+            max_value=500,
+            value=50,
+            step=10,
+            key="audit_limit"
+        )
+    
+    if st.button("📥 Query Rule Audit Table", use_container_width=True):
         if is_live:
             try:
-                with registry_manager.spanner_db.snapshot() as snapshot:
-                    query = "SELECT table_name, row_key, rule_id, status, error_message, evaluated_at FROM rule_audit ORDER BY evaluated_at DESC LIMIT 50"
-                    results = snapshot.execute_sql(query)
-                    rows = list(results)
-                    if rows:
-                        import pandas as pd
-                        df = pd.DataFrame(rows, columns=["table_name", "row_key", "rule_id", "status", "error_message", "evaluated_at"])
+                with st.spinner("⏳ Querying live audit logs from Spanner..."):
+                    with registry_manager.spanner_db.snapshot() as snapshot:
+                        # Build dynamic WHERE clause for status filter
+                        status_clause = ", ".join([f"'{s}'" for s in audit_status_filter]) if audit_status_filter else "'PASS', 'FAIL'"
                         
-                        def color_status(val):
-                            color = '#00C853' if val == 'PASS' else '#D50000'
-                            return f'color: {color}; font-weight: bold;'
+                        query = f"""
+                        SELECT 
+                            table_name, 
+                            row_key, 
+                            rule_id, 
+                            status, 
+                            error_message, 
+                            evaluated_at 
+                        FROM rule_audit 
+                        WHERE status IN ({status_clause})
+                        ORDER BY evaluated_at DESC 
+                        LIMIT {audit_limit}
+                        """
+                        
+                        results = snapshot.execute_sql(query)
+                        rows = list(results)
+                        
+                        if rows:
+                            import pandas as pd
+                            df = pd.DataFrame(
+                                rows,
+                                columns=["Table", "Row Key", "Rule ID", "Status", "Error Message", "Evaluated At"]
+                            )
                             
-                        st.dataframe(df.style.map(color_status, subset=['status']), use_container_width=True)
-                    else:
-                        st.warning("No audit logs found. Run Dataflow pipeline first.")
-            except Exception as e:
-                st.error(f"Error querying rule_audit: {e}")
+                            # Style the dataframe
+                            def color_status(val):
+                                if val == "PASS":
+                                    return "color: #00C853; font-weight: bold; background-color: rgba(0,200,83,0.1)"
+                                elif val == "FAIL":
+                                    return "color: #D50000; font-weight: bold; background-color: rgba(213,0,0,0.1)"
+                                else:
+                                    return "color: #FFA726; font-weight: bold; background-color: rgba(255,167,38,0.1)"
+                            
+                            styled_df = df.style.map(color_status, subset=["Status"])
+                            st.dataframe(styled_df, use_container_width=True)
+                            
+                            # Show statistics
+                            col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+                            with col_stat1:
+                                pass_count = len(df[df["Status"] == "PASS"])
+                                st.metric("✅ Passed", pass_count)
+                            with col_stat2:
+                                fail_count = len(df[df["Status"] == "FAIL"])
+                                st.metric("❌ Failed", fail_count)
+                            with col_stat3:
+                                warn_count = len(df[df["Status"] == "WARN"])
+                                st.metric("⚠️ Warnings", warn_count)
+                            with col_stat4:
+                                total = len(df)
+                                pass_rate = (pass_count / total * 100) if total > 0 else 0
+                                st.metric("Pass Rate", f"{pass_rate:.1f}%")
+                            
+                            # Export button
+                            csv_export = df.to_csv(index=False)
+                            st.download_button(
+                                "📥 Export as CSV",
+                                csv_export,
+                                "audit_logs.csv",
+                                "text/csv",
+                                use_container_width=True
+                            )
+                        else:
+                            st.warning("⚠️ No audit logs found matching the filter. Run Dataflow ingestion in Tab 1 first.")
+            
+            except Exception as spanner_err:
+                st.error(f"❌ Spanner query failed: {spanner_err}")
+                st.info("💡 Tip: Ensure the `rule_audit` table exists. Deploy the ontology schema in Tab 1 first.")
+                with st.expander("Show Error Details"):
+                    st.code(str(spanner_err))
+        
         else:
-            st.warning("Connect to Live Spanner to view audit logs.")
+            # Simulated audit logs for demonstration
+            st.success("📌 Showing simulated audit logs (not connected to live Spanner)")
             
             import pandas as pd
-            mock_data = [
-                {"table_name": "network_routing", "row_key": "NR-001", "rule_id": "NR-001", "status": "PASS", "error_message": "", "evaluated_at": "2026-06-22T10:00:00Z"},
-                {"table_name": "network_routing_segment", "row_key": "SEG-005", "rule_id": "SEG-002", "status": "FAIL", "error_message": "origin == destination", "evaluated_at": "2026-06-22T10:05:00Z"}
-            ]
-            df = pd.DataFrame(mock_data)
-            def color_status(val):
-                color = '#00C853' if val == 'PASS' else '#D50000'
-                return f'color: {color}; font-weight: bold;'
-            st.dataframe(df.style.map(color_status, subset=['status']), use_container_width=True)
+            import datetime
             
+            # Generate realistic mock data
+            mock_data = [
+                {
+                    "Table": "network_routing",
+                    "Row Key": "NR-001",
+                    "Rule ID": "rule_routing_valid_ids",
+                    "Status": "PASS",
+                    "Error Message": "",
+                    "Evaluated At": "2026-06-24T10:00:00Z"
+                },
+                {
+                    "Table": "network_routing",
+                    "Row Key": "NR-002",
+                    "Rule ID": "rule_routing_not_null",
+                    "Status": "PASS",
+                    "Error Message": "",
+                    "Evaluated At": "2026-06-24T10:05:00Z"
+                },
+                {
+                    "Table": "network_routing_segment",
+                    "Row Key": "SEG-001",
+                    "Rule ID": "rule_segment_origin_neq_dest",
+                    "Status": "FAIL",
+                    "Error Message": "origin_operation_id == destination_operation_id (OAK == OAK)",
+                    "Evaluated At": "2026-06-24T10:10:00Z"
+                },
+                {
+                    "Table": "network_routing_segment",
+                    "Row Key": "SEG-002",
+                    "Rule ID": "rule_segment_weight_range",
+                    "Status": "PASS",
+                    "Error Message": "",
+                    "Evaluated At": "2026-06-24T10:15:00Z"
+                },
+                {
+                    "Table": "network_routing_segment",
+                    "Row Key": "SEG-003",
+                    "Rule ID": "rule_segment_transport_mode",
+                    "Status": "WARN",
+                    "Error Message": "Unusual transport mode: TELEPORT (expected TRUCK/AIR/RAIL)",
+                    "Evaluated At": "2026-06-24T10:20:00Z"
+                },
+                {
+                    "Table": "network_routing",
+                    "Row Key": "NR-003",
+                    "Rule ID": "rule_routing_service_level",
+                    "Status": "PASS",
+                    "Error Message": "",
+                    "Evaluated At": "2026-06-24T10:25:00Z"
+                },
+            ]
+            
+            # Apply status filter
+            filtered_data = [d for d in mock_data if d["Status"] in audit_status_filter] if audit_status_filter else mock_data
+            filtered_data = filtered_data[:audit_limit]
+            
+            df = pd.DataFrame(filtered_data)
+            
+            # Style dataframe
+            def color_status(val):
+                if val == "PASS":
+                    return "color: #00C853; font-weight: bold; background-color: rgba(0,200,83,0.1)"
+                elif val == "FAIL":
+                    return "color: #D50000; font-weight: bold; background-color: rgba(213,0,0,0.1)"
+                else:
+                    return "color: #FFA726; font-weight: bold; background-color: rgba(255,167,38,0.1)"
+            
+            styled_df = df.style.map(color_status, subset=["Status"])
+            st.dataframe(styled_df, use_container_width=True)
+            
+            # Statistics
+            col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+            with col_stat1:
+                pass_count = len(df[df["Status"] == "PASS"])
+                st.metric("✅ Passed", pass_count)
+            with col_stat2:
+                fail_count = len(df[df["Status"] == "FAIL"])
+                st.metric("❌ Failed", fail_count)
+            with col_stat3:
+                warn_count = len(df[df["Status"] == "WARN"])
+                st.metric("⚠️ Warnings", warn_count)
+            with col_stat4:
+                total = len(df)
+                pass_rate = (pass_count / total * 100) if total > 0 else 0
+                st.metric("Pass Rate", f"{pass_rate:.1f}%")
+            
+            # Export button
+            csv_export = df.to_csv(index=False)
+            st.download_button(
+                "📥 Export as CSV",
+                csv_export,
+                "audit_logs_simulated.csv",
+                "text/csv",
+                use_container_width=True
+            )
+    
     st.markdown("</div>", unsafe_allow_html=True)
+    
+    # AUDIT INSIGHTS
+    st.markdown("---")
+    st.subheader("📈 Audit Insights")
+    
+    col_insight1, col_insight2 = st.columns(2)
+    
+    with col_insight1:
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("**🎯 Common Failure Patterns**")
+        st.caption(
+            "- **Schema Validation:** Missing required fields in object types\n"
+            "- **Relationship Logic:** Origin/destination conflicts in routing segments\n"
+            "- **Data Quality:** Out-of-range values for weight, duration, etc.\n"
+            "- **Referential Integrity:** Foreign key violations between tables"
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+    
+    with col_insight2:
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("**🔧 Remediation Workflow**")
+        st.caption(
+            "1. **Review Failures:** Filter by FAIL status to see problematic records\n"
+            "2. **Inspect Error Details:** Check error_message column for root cause\n"
+            "3. **Fix Data:** Correct violations in source systems\n"
+            "4. **Re-ingest:** Re-run Dataflow pipeline with corrected data\n"
+            "5. **Verify:** Query audit logs again to confirm pass rate improved"
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
 
 # TAB 5: Graph Explorer - COMPLETE FIXED VERSION
 with tab5:
