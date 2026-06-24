@@ -1582,8 +1582,15 @@ with tab5:
                     for k, v in props.items():
                         title += f"{k}: {v}\n"
                         
-                    if source in table_nodes_added and target in table_nodes_added:
-                        net.add_edge(source, target, title=title, color="#808080", arrows="to")
+                    if source not in table_nodes_added:
+                        net.add_node(source, label=f"Ghost: {source}", title="Missing Node (FK mismatch)", color="#333333", size=10)
+                        table_nodes_added.add(source)
+                        
+                    if target not in table_nodes_added:
+                        net.add_node(target, label=f"Ghost: {target}", title="Missing Node (FK mismatch)", color="#333333", size=10)
+                        table_nodes_added.add(target)
+                        
+                    net.add_edge(source, target, title=title, color="#808080", arrows="to")
                         
             except Exception as e:
                 st.warning(f"⚠️ Live Spanner unavailable or graph population failed: {str(e)[:100]}")
