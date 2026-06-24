@@ -45,6 +45,7 @@ steps:
         pip install -r requirements.txt -q
         echo "=== Step 3: Detecting schema drift ==="
         python -m scripts.drift_detector \
+          --ontology_dir=ontology \
           --apply-mode=auto-additive \
           --project=migiration-demo \
           --instance=ontology-demo \
@@ -63,6 +64,7 @@ steps:
         pip install -r requirements.txt -q
         echo "=== Step 4: Applying additive schema evolution to Spanner ==="
         python -m scripts.drift_detector \
+          --ontology_dir=ontology \
           --apply-mode=auto-additive \
           --apply \
           --project=migiration-demo \
