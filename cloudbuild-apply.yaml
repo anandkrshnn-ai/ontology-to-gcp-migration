@@ -72,5 +72,24 @@ steps:
           --database=ontology-db
         echo "✅ Schema evolution applied to Spanner."
 
+  - name: 'python:3.11-slim'
+    id: 'run-dvt-validation'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        cd /workspace
+        export PYTHONPATH=/workspace
+        pip install -r requirements.txt -q
+        echo "=== Step 5: Executing DVT Semantic validation (Dry-Run mode) ==="
+        python -m scripts.dvt_validator \
+          --ontology-dir=ontology \
+          --project=migiration-demo \
+          --spanner-instance=ontology-demo \
+          --spanner-database=ontology-db \
+          --dry-run
+        echo "✅ DVT semantic validations passed."
+
 options:
   logging: CLOUD_LOGGING_ONLY

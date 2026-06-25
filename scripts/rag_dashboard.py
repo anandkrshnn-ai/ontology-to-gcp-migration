@@ -1469,6 +1469,80 @@ with tab4:
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
+    # GCP DVT Semantic Validation Report Section
+    st.markdown("---")
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.subheader("🔍 GCP Data Validation Tool (DVT) Reports")
+    st.caption("Runs semantic validation checks between source filesystem CSVs and target GCP Spanner / BigQuery databases using generated YAML configs.")
+    
+    col_dvt1, col_dvt2 = st.columns(2)
+    with col_dvt1:
+        dvt_mode = st.selectbox(
+            "Select Validation Mode:",
+            options=["fs-to-spanner", "spanner-to-bq", "fs-to-bq"],
+            key="dvt_dashboard_mode"
+        )
+    with col_dvt2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        run_dvt = st.button("🚀 Run DVT Semantic Validation (Dry-Run)", use_container_width=True)
+        
+    if run_dvt:
+        with st.spinner("⏳ Compiling configs and executing DVT validations..."):
+            try:
+                from scripts.dvt_validator import DVTValidator
+                validator = DVTValidator(
+                    ontology_dir=ontology_dir,
+                    project_id=spanner_project if is_live else "prj-data-gold-demo",
+                    spanner_instance=spanner_instance if is_live else "ontology-demo",
+                    spanner_database=spanner_database if is_live else "ontology-db",
+                    dry_run=True  # Always dry_run=True in the dashboard to avoid calling subprocess when live Targets are not configured
+                )
+                
+                # Setup
+                validator.setup_connections()
+                
+                # Validation
+                results = validator.run_validation(mode=dvt_mode)
+                
+                st.success(f"✔️ DVT Validations completed! Overall Status: **{results['status']}**")
+                
+                # Show results in a clean table
+                import pandas as pd
+                dvt_rows = []
+                for r in results["results"]:
+                    dvt_rows.append({
+                        "Entity": r["entity"],
+                        "Table": r["table_name"],
+                        "Row Count Check": r["table_count_validation"],
+                        "Column Check": r["column_validation"]
+                    })
+                dvt_df = pd.DataFrame(dvt_rows)
+                
+                # Highlight status
+                def color_dvt_status(val):
+                    if val == "SUCCESS":
+                        return "color: #00C853; font-weight: bold; background-color: rgba(0,200,83,0.1)"
+                    elif val == "FAILED":
+                        return "color: #D50000; font-weight: bold; background-color: rgba(213,0,0,0.1)"
+                    return ""
+                
+                styled_dvt_df = dvt_df.style.map(color_dvt_status, subset=["Row Count Check", "Column Check"])
+                st.dataframe(styled_dvt_df, use_container_width=True)
+                
+                # Add terminal console log simulator
+                st.markdown("**Console Log Outputs:**")
+                log_content = ""
+                for r in results["results"]:
+                    log_content += f"Running row count validation on {r['table_name']}:\n{r['count_output']}\n"
+                    log_content += f"Running column validation on {r['table_name']}:\n{r['column_output']}\n\n"
+                
+                st.markdown(f'<div class="terminal-console"><pre>{log_content}</pre></div>', unsafe_allow_html=True)
+                
+            except Exception as dvt_err:
+                st.error(f"❌ DVT execution failed: {dvt_err}")
+                
+    st.markdown("</div>", unsafe_allow_html=True)
+
 # TAB 5: Graph Explorer - WORKING VERSION WITH MINIMAL DIAGNOSTICS
 with tab5:
     st.markdown("### Interactive Network Graph Visualization")

@@ -9,3 +9,4 @@ pydantic==2.7.1
 pytest==8.2.0
 google-cloud-spanner
 google-cloud-aiplatform>=1.47.0
+google-pso-data-validator

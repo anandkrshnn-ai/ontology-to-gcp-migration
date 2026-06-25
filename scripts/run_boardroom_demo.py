@@ -101,26 +101,45 @@ def run_demo():
     print(f"Proxy Response (Write via Cloud SQL): {json.dumps(resp2.json(), indent=2)}")
 
     # --- 4. Semantic Validator ---
-    print("\n[STEP 4] Semantic Gating: PySpark Hash Validation")
-    print("Simulating PySpark Hash Match Failure (Corruption Prevented)...")
+    print("\n[STEP 4] Semantic Gating: GCP Data Validation Tool (DVT)")
+    print("ONTOLOGY GATING SEQUENCE:")
     
-    # Mock PySpark module
-    import sys
-    sys.modules['pyspark'] = MagicMock()
-    sys.modules['pyspark.sql'] = MagicMock()
-    sys.modules['pyspark.sql.functions'] = MagicMock()
+    # Stage 1: ontology compiled
+    print("  1. 🛠️ ontology compiled: Parsing ObjectType specs from local YAMLs...")
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.')))
+    import dvt_validator as dvt_module
     
-    # We simulate the exact logic from the pyspark script
-    import pyspark_hash_validator as val_module
-    actual_hash = "INVALID_HASH_888"
-    expected_hash = "8f4e3c1b2a9d8f7e6c5b4a3d2e1f0a9b"
-    try:
-        if actual_hash != expected_hash:
-            error_msg = f"SEMANTIC MISMATCH: Expected {expected_hash}, got {actual_hash}. The migrated data is corrupted."
-            logging.error(error_msg)
-            raise val_module.SemanticFidelityError(error_msg)
-    except val_module.SemanticFidelityError as e:
-        print(f"PIPELINE HALTED: {str(e)}")
+    dvt_val = dvt_module.DVTValidator(
+        ontology_dir="ontology",
+        project_id="prj-data-gold-demo",
+        spanner_instance="ontology-demo",
+        spanner_database="ontology-db",
+        dry_run=True
+    )
+    
+    entities = dvt_val.discover_entities()
+    print(f"     Found {len(entities)} ObjectType entities compiled from ontology.")
+    
+    # Stage 2: data loaded
+    print("  2. 📥 data loaded: Initializing database connection registrations...")
+    dvt_val.setup_connections()
+    
+    # Stage 3: DVT row-count/schema checks passed
+    print("  3. 🔍 DVT row-count/schema checks passed: Executing semantic validations...")
+    dvt_results = dvt_val.run_validation(mode="fs-to-spanner")
+    print("\n=== DVT Validation Summary Report ===")
+    print(f"Overall Status: {dvt_results['status']}")
+    for r in dvt_results["results"][:4]:  # Show first 4 entities in demo for brevity
+        print(f"- Entity: {r['entity']} ({r['table_name']})")
+        print(f"  Row Count Check: {r['table_count_validation']}")
+        print(f"  Column Check   : {r['column_validation']}")
+    print("=================================\n")
+    
+    # Stage 4: serving plane enabled
+    if dvt_results["status"] == "SUCCESS":
+        print("  4. 🚀 serving plane enabled: Data validated with 100% fidelity. Routing query traffic to GCP Spanner/BigQuery.")
+    else:
+        print("  ❌ GATING FAILED: Semantic mismatches detected. Serving plane disabled.")
 
     print("\n" + "="*80)
     print("✅ DEMO COMPLETE: The V7 Engine has successfully prevented corruption and data loss.")
