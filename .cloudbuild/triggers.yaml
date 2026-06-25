@@ -1,6 +1,6 @@
 triggers:
 - name: ontology-plan
-  project: tzwkexo-re-ai-lab
+  project: migiration-demo
   configFilePath: cloudbuild-plan.yaml
   eventType: push
   includedGitRefs: ^refs/heads/master$
@@ -8,9 +8,9 @@ triggers:
   - "ontology/**"
   - "scripts/**"
   - "cloudbuild-plan.yaml"
-  serviceAccount: projects/tzwkexo-re-ai-lab/serviceAccounts/459423655792-compute@developer.gserviceaccount.com
+  serviceAccount: projects/migiration-demo/serviceAccounts/656669276990-compute@developer.gserviceaccount.com
 - name: ontology-apply
-  project: tzwkexo-re-ai-lab
+  project: migiration-demo
   configFilePath: cloudbuild-apply.yaml
   eventType: push
   includedGitRefs: ^refs/heads/master$
@@ -18,5 +18,5 @@ triggers:
   - "ontology/**"
   - "scripts/**"
   - "cloudbuild-apply.yaml"
-  serviceAccount: projects/tzwkexo-re-ai-lab/serviceAccounts/459423655792-compute@developer.gserviceaccount.com
+  serviceAccount: projects/migiration-demo/serviceAccounts/656669276990-compute@developer.gserviceaccount.com
   disabled: true
