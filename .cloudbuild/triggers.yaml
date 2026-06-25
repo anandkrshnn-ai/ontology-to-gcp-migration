@@ -1,0 +1,22 @@
+triggers:
+- name: ontology-plan
+  project: tzwkexo-re-ai-lab
+  configFilePath: cloudbuild-plan.yaml
+  eventType: push
+  includedGitRefs: ^refs/heads/master$
+  includedFiles:
+  - "ontology/**"
+  - "scripts/**"
+  - "cloudbuild-plan.yaml"
+  serviceAccount: projects/tzwkexo-re-ai-lab/serviceAccounts/459423655792-compute@developer.gserviceaccount.com
+- name: ontology-apply
+  project: tzwkexo-re-ai-lab
+  configFilePath: cloudbuild-apply.yaml
+  eventType: push
+  includedGitRefs: ^refs/heads/master$
+  includedFiles:
+  - "ontology/**"
+  - "scripts/**"
+  - "cloudbuild-apply.yaml"
+  serviceAccount: projects/tzwkexo-re-ai-lab/serviceAccounts/459423655792-compute@developer.gserviceaccount.com
+  disabled: true
