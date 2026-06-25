@@ -34,9 +34,9 @@ class DVTValidationError(Exception):
 class DVTValidator:
     def __init__(self, 
                  ontology_dir: str = "ontology", 
-                 project_id: str = "prj-data-gold-demo",
-                 spanner_instance: str = "ontology-demo",
-                 spanner_database: str = "ontology-db",
+                 project_id: str = "tzwkexo-re-ai-lab",
+                 spanner_instance: str = "fedex-free-poc-instance",
+                 spanner_database: str = "fedex_poc_sandbox",
                  bq_dataset: str = "palantir_ontology_dev_unique",
                  dry_run: bool = False):
         self.ontology_dir = ontology_dir
@@ -323,9 +323,9 @@ def main():
     parser.add_argument("--ontology-dir", default="ontology", help="Path to ontology YAML files")
     parser.add_argument("--mode", choices=["fs-to-spanner", "spanner-to-bq", "fs-to-bq"], default="fs-to-spanner",
                         help="Validation mapping mode")
-    parser.add_argument("--project", default="prj-data-gold-demo", help="GCP Project ID")
-    parser.add_argument("--spanner-instance", default="ontology-demo", help="Spanner Instance ID")
-    parser.add_argument("--spanner-database", default="ontology-db", help="Spanner Database ID")
+    parser.add_argument("--project", default="tzwkexo-re-ai-lab", help="GCP Project ID")
+    parser.add_argument("--spanner-instance", default="fedex-free-poc-instance", help="Spanner Instance ID")
+    parser.add_argument("--spanner-database", default="fedex_poc_sandbox", help="Spanner Database ID")
     parser.add_argument("--bq-dataset", default="palantir_ontology_dev_unique", help="Target BigQuery dataset name")
     parser.add_argument("--dry-run", action="store_true", default=False, help="Print commands instead of executing them")
 
