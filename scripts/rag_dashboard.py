@@ -450,9 +450,9 @@ spanner_database = ""
 if conn_mode == "Live Google Cloud Spanner":
     st.sidebar.markdown("---")
     st.sidebar.subheader("Spanner Configuration")
-    spanner_project = st.sidebar.text_input("GCP Project ID:", value=os.environ.get("GOOGLE_CLOUD_PROJECT", "migiration-demo"))
-    spanner_instance = st.sidebar.text_input("Spanner Instance ID:", value="ontology-demo")
-    spanner_database = st.sidebar.text_input("Spanner Database ID:", value="ontology-db")
+    spanner_project = st.sidebar.text_input("GCP Project ID:", value=os.environ.get("GOOGLE_CLOUD_PROJECT", "tzwkexo-re-ai-lab"))
+    spanner_instance = st.sidebar.text_input("Spanner Instance ID:", value="fedex-free-poc-instance")
+    spanner_database = st.sidebar.text_input("Spanner Database ID:", value="fedex_poc_sandbox")
     
     st.sidebar.info("💡 Make sure you run 'terraform apply' or create the Spanner Instance & Database in your GCP Console first.")
 

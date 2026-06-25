@@ -47,9 +47,9 @@ steps:
         python -m scripts.drift_detector \
           --ontology_dir=ontology \
           --apply-mode=auto-additive \
-          --project=migiration-demo \
-          --instance=ontology-demo \
-          --database=ontology-db
+          --project=tzwkexo-re-ai-lab \
+          --instance=fedex-free-poc-instance \
+          --database=fedex_poc_sandbox
         echo "✅ Drift detection complete."
 
   - name: 'python:3.11-slim'
@@ -67,9 +67,9 @@ steps:
           --ontology_dir=ontology \
           --apply-mode=auto-additive \
           --apply \
-          --project=migiration-demo \
-          --instance=ontology-demo \
-          --database=ontology-db
+          --project=tzwkexo-re-ai-lab \
+          --instance=fedex-free-poc-instance \
+          --database=fedex_poc_sandbox
         echo "✅ Schema evolution applied to Spanner."
 
   - name: 'python:3.11-slim'
@@ -85,9 +85,9 @@ steps:
         echo "=== Step 5: Executing DVT Semantic validation (Dry-Run mode) ==="
         python -m scripts.dvt_validator \
           --ontology-dir=ontology \
-          --project=migiration-demo \
-          --spanner-instance=ontology-demo \
-          --spanner-database=ontology-db \
+          --project=tzwkexo-re-ai-lab \
+          --spanner-instance=fedex-free-poc-instance \
+          --spanner-database=fedex_poc_sandbox \
           --dry-run
         echo "✅ DVT semantic validations passed."
 
