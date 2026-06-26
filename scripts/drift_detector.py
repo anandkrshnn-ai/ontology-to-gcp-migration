@@ -83,7 +83,7 @@ def get_live_spanner_schema(project_id, instance_id, database_id, table_filter=N
         WHERE table_catalog = '' AND table_schema = ''
         AND table_name NOT LIKE 'v_%'
         AND table_name NOT IN ('raw_yaml_registry', 'canonical_object_types',
-            'canonical_relationship_types', 'schema_change_log', 'deployment_audit', 'rule_audit')
+            'canonical_relationship_types', 'schema_change_log', 'deployment_audit', 'rule_audit', 'transit_connection', 'ontology_object_registry', 'file_processing_status', 'rule_definitions', 'route', 'transactions', 'waypoint', 'ontology_change_log', 'location')
     """
 
     if table_filter:
