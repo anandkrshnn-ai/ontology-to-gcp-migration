@@ -1,0 +1,46 @@
+apiVersion: routing.ontology/v1
+kind: ObjectType
+metadata:
+  name: Route
+  domain: Ground
+  version: 1.0.0
+  steward: route-graph-ontology-team
+  description: Stores the overall route definition.
+spec:
+  table: route
+  primaryKey: [route_id_txt]
+  attributes:
+    - name: route_id_txt
+      type: STRING(100)
+      required: true
+    - name: source_cd
+      type: STRING(100)
+      required: false
+    - name: valid_routing_path
+      type: STRING(MAX)
+      required: false
+    - name: ursa_prefix_cd
+      type: STRING(100)
+      required: false
+  relationships:
+    - name: has_transit_connections
+      edge: HAS_TRANSIT
+      target: TransitConnection
+      cardinality: one_to_many
+      via: { localKey: route_id_txt, targetKey: route_id_txt }
+    - name: has_waypoints
+      edge: HAS_WAYPOINT
+      target: Waypoint
+      cardinality: one_to_many
+      via: { localKey: route_id_txt, targetKey: route_id_txt }
+  rules:
+    - id: RT-001
+      field: route_id_txt
+      description: route_id_txt must not be empty.
+      expression: "route_id_txt IS NOT NULL AND route_id_txt != ''"
+      severity: reject
+    - id: RT-002
+      field: source_cd
+      description: source_cd must not exceed max length if provided.
+      expression: "source_cd IS NULL OR LENGTH(source_cd) <= 100"
+      severity: warn

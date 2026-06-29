@@ -1,0 +1,35 @@
+apiVersion: routing.ontology/v1
+kind: ObjectType
+metadata:
+  name: Location
+  domain: Ground
+  version: 1.0.0
+  steward: route-graph-ontology-team
+  description: Stores physical facilities and locations.
+spec:
+  table: location
+  primaryKey: [location_cd]
+  attributes:
+    - name: location_cd
+      type: STRING(100)
+      required: true
+    - name: owner
+      type: STRING(100)
+      required: false
+    - name: country
+      type: STRING(100)
+      required: false
+    - name: source
+      type: STRING(100)
+      required: false
+  rules:
+    - id: LOC-001
+      field: location_cd
+      description: location_cd must not be empty.
+      expression: "location_cd IS NOT NULL AND location_cd != ''"
+      severity: reject
+    - id: LOC-002
+      field: country
+      description: country code must not exceed 3 chars if provided.
+      expression: "country IS NULL OR LENGTH(country) <= 3"
+      severity: warn

@@ -1,0 +1,77 @@
+apiVersion: routing.ontology/v1
+kind: ObjectType
+metadata:
+  name: TransitConnection
+  domain: Ground
+  version: 1.0.0
+  steward: route-graph-ontology-team
+  description: Stores transport movement for each leg.
+spec:
+  table: transit_connection
+  primaryKey: [transit_id]
+  attributes:
+    - name: transit_id
+      type: STRING(100)
+      required: true
+    - name: route_id_txt
+      type: STRING(100)
+      required: true
+    - name: leg_no
+      type: STRING(100)
+      required: true
+    - name: mode
+      type: STRING(100)
+      required: false
+    - name: carrier
+      type: STRING(100)
+      required: false
+    - name: depart_ts
+      type: STRING(100)
+      required: false
+    - name: depart_operation
+      type: STRING(100)
+      required: false
+    - name: arrive_ts
+      type: STRING(100)
+      required: false
+    - name: arrive_operation
+      type: STRING(100)
+      required: false
+    - name: depart_location_cd
+      type: STRING(100)
+      required: true
+    - name: arrive_location_cd
+      type: STRING(100)
+      required: true
+  relationships:
+    - name: belongs_to_route
+      edge: BELONGS_TO
+      target: Route
+      cardinality: many_to_one
+      via: { localKey: route_id_txt, targetKey: route_id_txt }
+    - name: departs_from
+      edge: DEPARTS_FROM
+      target: Location
+      cardinality: many_to_one
+      via: { localKey: depart_location_cd, targetKey: location_cd }
+    - name: arrives_at
+      edge: ARRIVES_AT
+      target: Location
+      cardinality: many_to_one
+      via: { localKey: arrive_location_cd, targetKey: location_cd }
+  rules:
+    - id: TC-001
+      field: depart_location_cd
+      description: Depart and arrive locations must differ.
+      expression: "depart_location_cd != arrive_location_cd"
+      severity: reject
+    - id: TC-002
+      field: mode
+      description: mode must be a known transport mode if provided.
+      expression: "mode IS NULL OR mode IN ('AIR', 'GROUND', 'SEA', 'RAIL')"
+      severity: warn
+    - id: TC-003
+      field: leg_no
+      description: leg_no must not be empty.
+      expression: "leg_no IS NOT NULL AND leg_no != ''"
+      severity: reject
