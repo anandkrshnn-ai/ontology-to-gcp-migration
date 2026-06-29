@@ -48,7 +48,7 @@ steps:
           --ontology_dir=ontology \
           --apply-mode=auto-additive \
           --project=tzwkexo-re-ai-lab \
-          --instance=fedex-free-poc-instance \
+          --instance=fedex-spanner-instance \
           --database=fedex_sandbox
         echo "✅ Drift detection complete."
 
@@ -68,7 +68,7 @@ steps:
           --apply-mode=auto-additive \
           --apply \
           --project=tzwkexo-re-ai-lab \
-          --instance=fedex-free-poc-instance \
+          --instance=fedex-spanner-instance \
           --database=fedex_sandbox
         echo "✅ Schema evolution applied to Spanner."
 
@@ -86,7 +86,7 @@ steps:
         python -m scripts.dvt_validator \
           --ontology-dir=ontology \
           --project=tzwkexo-re-ai-lab \
-          --spanner-instance=fedex-free-poc-instance \
+          --spanner-instance=fedex-spanner-instance \
           --spanner-database=fedex_sandbox \
           --dry-run
         echo "✅ DVT semantic validations passed."

@@ -53,7 +53,7 @@ steps:
         python -m scripts.drift_detector \
           --ontology_dir=ontology \
           --project=tzwkexo-re-ai-lab \
-          --instance=fedex-free-poc-instance \
+          --instance=fedex-spanner-instance \
           --database=fedex_sandbox \
           --changed-files=/workspace/changed_files.txt
 
