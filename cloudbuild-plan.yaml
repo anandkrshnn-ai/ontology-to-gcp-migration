@@ -53,8 +53,8 @@ steps:
         python -m scripts.drift_detector \
           --ontology_dir=ontology \
           --project=tzwkexo-re-ai-lab \
-          --instance=route-graph-instance \
-          --database=route_graph_model \
+          --instance=fedex-free-poc-instance \
+          --database=fedex_sandbox \
           --changed-files=/workspace/changed_files.txt
 
 options:
