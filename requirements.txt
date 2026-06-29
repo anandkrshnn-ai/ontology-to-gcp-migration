@@ -1,12 +1,12 @@
 fastapi==0.111.0
 uvicorn==0.30.0
 google-cloud-bigquery>=3.25.0,<4.0.0
-google-cloud-storage==2.16.0
+google-cloud-storage>=2.18.2,<3.0.0
 google-cloud-pubsub==2.21.1
 google-auth>=2.47.0,<3.0.0
 tenacity==8.3.0
 pydantic==2.7.1
 pytest==8.2.0
-google-cloud-spanner
+google-cloud-spanner>=3.40.0
 google-cloud-aiplatform>=1.47.0
-google-pso-data-validator
+google-pso-data-validator>=8.8.0
