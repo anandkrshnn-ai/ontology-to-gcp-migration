@@ -84,7 +84,7 @@ class ParseCsvDict(beam.DoFn):
 
 
 def run(argv=None):
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument('--input_dir', required=True, help='Path to input CSV files (local or gs://)')
     parser.add_argument('--ontology_dir', required=True, help='Path to local ontology YAML files')
     parser.add_argument('--project_id', required=True, help='GCP Project ID')
