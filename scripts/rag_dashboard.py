@@ -197,6 +197,94 @@ if os.path.exists(ontology_dir):
 
 st.session_state.yamls = yamls
 
+# -------------------------------------------------------------------
+# Route GraphRAG helpers
+# -------------------------------------------------------------------
+
+def fetch_route_context(db, route_id: str):
+    """
+    Retrieve ordered route-leg context directly from live Spanner.
+    This uses the deployed route graph tables as the retrieval source.
+    """
+    sql = """
+    SELECT
+      r.route_id_txt,
+      w.leg_no,
+      w.location_cd,
+      t.mode,
+      t.carrier
+    FROM route r
+    JOIN waypoint w
+      ON r.route_id_txt = w.route_id_txt
+    LEFT JOIN transit_connection t
+      ON w.transit_id = t.transit_id
+    WHERE r.route_id_txt = @route_id
+    ORDER BY CAST(w.leg_no AS INT64)
+    """
+
+    from google.cloud.spanner_v1 import param_types
+
+    with db.snapshot() as snapshot:
+        rows = list(
+            snapshot.execute_sql(
+                sql,
+                params={"route_id": route_id},
+                param_types={
+                    "route_id": param_types.STRING
+                }
+            )
+        )
+
+    return rows
+
+
+def build_graph_context(rows) -> str:
+    """
+    Convert route rows into a compact Gemini-ready context block.
+    """
+    if not rows:
+        return "No route data found"
+
+    route = rows[0][0]
+    locations = []
+    mode = ""
+    carrier = ""
+
+    for row in rows:
+        locations.append(str(row[2]))
+        mode = row[3] or mode
+        carrier = row[4] or carrier
+
+    return f"""
+Route:
+{route}
+
+Carrier:
+{carrier}
+
+Mode:
+{mode}
+
+Stops:
+{' -> '.join(locations)}
+""".strip()
+
+
+def build_route_explanation_prompt(question: str, context: str) -> str:
+    return f"""
+You are a FedEx route analyst.
+
+Using only the supplied graph context,
+explain the route.
+
+Question:
+{question}
+
+Graph Context:
+{context}
+""".strip()
+
+
 def load_ontology_graph_config(yaml_dict: dict) -> dict:
     nodes = []
     edges = []
@@ -939,7 +1027,7 @@ with tab2:
                             st.info(doc['text'])
                         with col_result_score:
                             st.metric(
-                                "Similarity",
+                            "Similarity",
                                 f"{score:.3f}",
                                 delta="Match ✓" if score > 0.5 else "Partial"
                             )
@@ -950,282 +1038,130 @@ with tab2:
 
 
 
-# TAB 3: GraphRAG Serving - COMPLETE FIXED VERSION
 with tab3:
-    st.markdown("### Interactive Graph-Backed Retrieval (GraphRAG)")
-    st.info("🚀 **Real-time demonstration:** Combines semantic search + graph traversal + LLM synthesis")
-    
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.subheader("Ask the Serving Plane")
-    
-    sample_queries = [
-        "Why is operational capacity degraded at the Chicago Hub, and what is the transit mode to its segments?",
-        "What segments connect to Chicago Logistics Hub?",
-        "Which routes are affected by power fluctuations at OAK-STN?",
-        "What is the status of maintenance logs?"
-    ]
-    
-    col_query_select, col_query_custom = st.columns([1, 1])
-    
-    with col_query_select:
-        query_input = st.selectbox("Sample Query:", sample_queries, key="sample_query_select")
-    
-    with col_query_custom:
-        custom_query = st.text_input("Or Enter Custom Query:", value="", key="custom_query_input", placeholder="Your question here...")
-    
-    active_query = custom_query if custom_query.strip() else query_input
-    
-    if st.button("▶️ Run GraphRAG Retriever", use_container_width=True):
+    st.markdown("## Route GraphRAG Explainer")
+    st.info(
+        "Query a real route from Spanner, convert the graph results into "
+        "structured context, and ask Gemini to produce a business explanation."
+    )
+
+    route_id_input = st.text_input(
+        "Route ID",
+        value="6612-RT-5-5-TRAILER-FSP-6612-REG-18",
+        help="Enter a route_id_txt from the deployed route graph."
+    )
+
+    route_question = st.text_area(
+        "Business Question",
+        value="Explain route 6612-RT-5-5-TRAILER-FSP-6612-REG-18",
+        height=120
+    )
+
+    action_col1, action_col2 = st.columns(2)
+
+    with action_col1:
+        fetch_graph_context_btn = st.button(
+            "Fetch Graph Context",
+            use_container_width=True
+        )
+
+    with action_col2:
+        explain_with_gemini = st.button(
+            "Explain With Gemini",
+            use_container_width=True
+        )
+
+    if fetch_graph_context_btn or explain_with_gemini:
+        if not is_live:
+            st.warning("Route GraphRAG requires Live Google Cloud Spanner mode.")
+            st.stop()
+
+        if not route_id_input.strip():
+            st.error("Please enter a valid route ID.")
+            st.stop()
+
         try:
-            # STEP 1: Semantic Search
-            st.markdown("<div class='step-header'>📄 Step 1: Semantic Document Retrieval</div>", unsafe_allow_html=True)
-            
-            with st.spinner("⏳ Executing similarity search over indexed chunks..."):
-                # Initialize vector store if needed
-                if "vector_store" not in st.session_state:
-                    try:
-                        if is_live:
-                            st.session_state.vector_store = VertexAIVectorStore(project=spanner_project, location="us-central1")
-                            st.session_state.using_vertex_ai = True
-                        else:
-                            st.session_state.vector_store = MockVectorStore()
-                            st.session_state.using_vertex_ai = False
-                    except Exception as vs_err:
-                        st.warning(f"Vector store init failed: {vs_err}")
-                        st.session_state.vector_store = MockVectorStore()
-                        st.session_state.using_vertex_ai = False
-                
-                # Perform semantic search
-                try:
-                    results = st.session_state.vector_store.semantic_search(active_query, top_k=2)
-                    if not results:
-                        st.warning("⚠️ No documents matched the query. Using default context...")
-                        # Use first document as fallback
-                        if st.session_state.vector_store.documents:
-                            matched = st.session_state.vector_store.documents[0]
-                            score = 0.0
-                        else:
-                            raise ValueError("No documents in vector store")
-                    else:
-                        matched = results[0]["document"]
-                        score = results[0]["score"]
-                except Exception as search_err:
-                    st.error(f"❌ Semantic search failed: {search_err}")
-                    st.stop()
-                
-                # Display matched document
-                col_match_doc, col_match_score = st.columns([3, 1])
-                with col_match_doc:
-                    st.write(f"**Matched:** `{matched['id']}`")
-                    st.info(matched["text"])
-                with col_match_score:
-                    st.metric("Similarity", f"{score:.3f}", delta="Strong match ✓" if score > 0.6 else "Moderate")
-            
-            # STEP 2: Spanner Graph Expansion
-            st.markdown("<div class='step-header'>🔗 Step 2: Spanner Graph Path Expansion</div>", unsafe_allow_html=True)
-            
-            graph_expansion = None
-            
-            with st.spinner("⏳ Traversing Spanner Graph paths..."):
-                if not is_live:
-                    # Simulated query expansion
-                    try:
-                        graph_db = SpannerGraphSimulator()
-                        graph_expansion = graph_db.execute_graph_expansion("NR-001")
-                        st.caption("📌 Using simulated graph (not connected to live Spanner)")
-                    except Exception as sim_err:
-                        st.error(f"❌ Graph simulator failed: {sim_err}")
-                        graph_expansion = None
-                else:
-                    # Real Spanner Graph query execution
-                    try:
-                        from google.cloud import spanner
-                        with registry_manager.spanner_db.snapshot() as snapshot:
-                            sql_query = """
-                            SELECT
-                              r.routing_id,
-                              r.service_commit,
-                              s.segment_id,
-                              s.transport_mode,
-                              s.weight
-                            FROM v_network_routing r
-                            LEFT JOIN v_network_routing_segment s ON s.routing_id = r.routing_id
-                            WHERE r.routing_id = @routing_id
-                            ORDER BY s.segment_id
-                            LIMIT 10
-                            """
-                            results = snapshot.execute_sql(
-                                sql_query,
-                                params={"routing_id": "NR-001"},
-                                param_types={"routing_id": spanner.param_types.STRING}
-                            )
-                            rows = list(results)
-                            
-                            st.caption("💡 Graph context retrieved via SQL traversal (Spanner Standard)")
-                            
-                            if rows:
-                                graph_expansion = {
-                                    "start_node": {
-                                        "id": "NR-001",
-                                        "details": {
-                                            "routing_id": rows[0][0],
-                                            "service_commit": rows[0][1]
-                                        }
-                                    },
-                                    "connections": [{
-                                        "target_segment_id": row[2] if row[2] else "N/A",
-                                        "transport_mode": row[3] if row[3] else "N/A",
-                                        "weight": row[4] if row[4] else "N/A",
-                                        "segment_details": {"status": "ACTIVE"}
-                                    } for row in rows if row[2]]  # Filter out None segment_ids
-                                }
-                            else:
-                                st.warning("⚠️ No live Spanner records. Using simulated fallback...")
-                                graph_db = SpannerGraphSimulator()
-                                graph_expansion = graph_db.execute_graph_expansion("NR-001")
-                    
-                    except Exception as spanner_err:
-                        st.warning(f"⚠️ Live Spanner query failed: {spanner_err}")
-                        st.info("Falling back to simulated graph...")
-                        try:
-                            graph_db = SpannerGraphSimulator()
-                            graph_expansion = graph_db.execute_graph_expansion("NR-001")
-                        except Exception as fallback_err:
-                            st.error(f"❌ Graph expansion completely failed: {fallback_err}")
-                            graph_expansion = None
-            
-            # Display graph expansion results
-            if graph_expansion:
-                col_gr1, col_gr2 = st.columns(2)
-                with col_gr1:
-                    st.markdown("**🟢 Starting Node (NetworkRouting)**")
-                    with st.expander("Show Details", expanded=True):
-                        st.json(graph_expansion["start_node"]["details"])
-                
-                with col_gr2:
-                    st.markdown("**🔗 Connected Edges (HAS_SEGMENT)**")
-                    with st.expander(f"Show {len(graph_expansion.get('connections', []))} Connections", expanded=True):
-                        if graph_expansion.get("connections"):
-                            for conn in graph_expansion["connections"]:
-                                st.json(conn)
-                        else:
-                            st.info("No connections found")
-            else:
-                st.error("❌ Graph expansion failed - cannot proceed with synthesis")
-                st.stop()
-            
-            # STEP 3: Context Integration & Generation
-            st.markdown("<div class='step-header'>✨ Step 3: Answer Synthesis</div>", unsafe_allow_html=True)
-            
-            # Build context payload
-            context_payload = (
-                f"--- MIGRATION CONTEXT EVIDENCE ---\n\n"
-                f"**Unstructured Evidence:**\n{matched['text']}\n\n"
-                f"**Structured Graph Traversal:**\n"
-                f"- Route: {graph_expansion['start_node']['id']}\n"
-                f"- Commitment: {graph_expansion['start_node']['details'].get('service_commit', 'N/A')}\n"
-            )
-            
-            if graph_expansion.get("connections"):
-                context_payload += f"- Connected Segments: {len(graph_expansion['connections'])}\n"
-                for i, conn in enumerate(graph_expansion["connections"][:3], 1):
-                    context_payload += (
-                        f"  #{i}: {conn.get('target_segment_id', 'N/A')} "
-                        f"({conn.get('transport_mode', 'N/A')}) - Status: {conn.get('segment_details', {}).get('status', 'UNKNOWN')}\n"
-                    )
-            
-            with st.expander("📋 Show Assembled Context Window"):
-                st.text(context_payload)
-            
-            st.markdown("**🤖 Synthesized Answer:**")
-            
-            # Try to get LLM synthesis
-            synthesis_failed = False
-            
-            if is_live:
-                # Try Vertex AI first
-                try:
-                    with st.spinner("⏳ Calling Vertex AI (Gemini 1.5)..."):
-                        vertexai.init(project=spanner_project, location="us-central1")
-                        
-                        prompt = (
-                            f"You are a helpful logistics and infrastructure database assistant.\n"
-                            f"Answer the user's question using ONLY the provided context.\n"
-                            f"Be concise and factual.\n\n"
-                            f"Context:\n{context_payload}\n\n"
-                            f"Question: {active_query}\n\n"
-                            f"Answer:"
-                        )
-                        
-                        try:
-                            model = GenerativeModel("gemini-1.5-flash-001")
-                            response = model.generate_content(prompt, stream=False)
-                            st.success(response.text)
-                        except Exception as gemini_flash_err:
-                            # Fallback to gemini-pro
-                            st.caption("(Using Gemini 1.0 Pro as fallback)")
-                            model = GenerativeModel("gemini-1.0-pro-001")
-                            response = model.generate_content(prompt, stream=False)
-                            st.success(response.text)
-                
-                except Exception as vertex_err:
-                    st.warning(f"⚠️ Vertex AI unavailable: {vertex_err}")
-                    synthesis_failed = True
-            
-            elif gemini_key:
-                # Use Gemini API Key from sidebar
-                try:
-                    with st.spinner("⏳ Calling Gemini API..."):
-                        import google.generativeai as genai
-                        genai.configure(api_key=gemini_key)
-                        model = genai.GenerativeModel('gemini-1.5-flash-001')
-                        
-                        prompt = (
-                            f"You are a helpful logistics and infrastructure database assistant.\n"
-                            f"Answer the user's question using ONLY the provided context.\n"
-                            f"Be concise and factual.\n\n"
-                            f"Context:\n{context_payload}\n\n"
-                            f"Question: {active_query}\n\n"
-                            f"Answer:"
-                        )
-                        
-                        response = model.generate_content(prompt)
-                        st.success(response.text)
-                
-                except Exception as gemini_err:
-                    st.warning(f"⚠️ Gemini API failed: {gemini_err}")
-                    synthesis_failed = True
-            
-            else:
-                synthesis_failed = True
-            
-            # Fallback static answer if LLM synthesis failed
-            if synthesis_failed:
-                st.info("💡 LLM synthesis unavailable. Using template answer...")
-                
-                fallback_answer = (
-                    f"Based on the combined evidence from unstructured logs and graph traversal:\n\n"
-                    f"**Key Finding:** {matched['id']} indicates operational issues in the system.\n\n"
-                    f"**Graph Context:** The route {graph_expansion['start_node']['id']} has a service commitment of "
-                    f"{graph_expansion['start_node']['details'].get('service_commit', 'N/A')}.\n\n"
+            with st.spinner("Retrieving route context from Spanner..."):
+                rows = fetch_route_context(
+                    registry_manager.spanner_db,
+                    route_id_input.strip()
                 )
-                
-                if graph_expansion.get("connections"):
-                    fallback_answer += (
-                        f"**Connected Infrastructure:** This route connects to {len(graph_expansion['connections'])} "
-                        f"segments via {', '.join(set(c.get('transport_mode', 'N/A') for c in graph_expansion['connections']))} transport.\n\n"
-                    )
-                
-                fallback_answer += "**Recommendation:** Review the operational logs and graph structure for detailed impact analysis."
-                
-                st.success(fallback_answer)
-        
-        except Exception as pipeline_err:
-            st.error(f"❌ GraphRAG pipeline failed: {pipeline_err}")
-            with st.expander("Show Error Details"):
-                st.code(str(pipeline_err))
-    
-    st.markdown("</div>", unsafe_allow_html=True)
+
+            if not rows:
+                st.warning(f"No route data found for '{route_id_input}'.")
+                st.stop()
+
+            context = build_graph_context(rows)
+
+            st.markdown("### Retrieved Graph Evidence")
+
+            metric_col1, metric_col2, metric_col3 = st.columns(3)
+            with metric_col1:
+                st.metric("Route", str(rows[0][0]))
+            with metric_col2:
+                st.metric("Carrier", str(rows[0][4] or "N/A"))
+            with metric_col3:
+                st.metric("Mode", str(rows[0][3] or "N/A"))
+
+            legs_data = []
+            for row in rows:
+                legs_data.append(
+                    {
+                        "route_id": str(row[0]),
+                        "leg_no": str(row[1]),
+                        "location_cd": str(row[2]),
+                        "mode": str(row[3] or ""),
+                        "carrier": str(row[4] or ""),
+                    }
+                )
+
+            st.dataframe(legs_data, use_container_width=True)
+
+            stops = [str(row[2]) for row in rows]
+            st.markdown("### Route Path")
+            st.success(" -> ".join(stops))
+
+            st.markdown("### Context Sent To Gemini")
+            st.code(context, language="text")
+
+            if explain_with_gemini:
+                if not gemini_key and not os.environ.get("GEMINI_API_KEY"):
+                    st.warning("Gemini API key not configured in sidebar or environment.")
+                    st.stop()
+
+                try:
+                    with st.spinner("Generating route explanation with Gemini..."):
+                        vertexai.init(
+                            project=spanner_project,
+                            location="us-central1"
+                        )
+                        model = GenerativeModel("gemini-1.5-flash-001")
+
+                        prompt = build_route_explanation_prompt(
+                            route_question.strip(),
+                            context
+                        )
+
+                        response = model.generate_content(
+                            prompt,
+                            stream=False
+                        )
+
+                    st.markdown("### Gemini Explanation")
+                    st.write(response.text)
+
+                except Exception as e:
+                    st.error(f"Gemini generation failed: {e}")
+
+        except Exception as e:
+            st.error(f"Route GraphRAG query failed: {e}")
+
+    st.markdown("---")
+    st.markdown("### Demo Flow")
+    st.code(
+        "Ontology YAML -> Cloud Build -> Graph Compiler -> Spanner Property Graph -> Route Query -> Gemini -> Business Explanation",
+        language="text",
+    )
 
 
 # TAB 4: Governance & Audit - COMPLETE FIXED VERSION
