@@ -20,7 +20,7 @@ spec:
       type: STRING(200)
       required: false
     - name: source
-      type: STRING(100)
+      type: STRING(200)
       required: false
   rules:
     - id: LOC-001
