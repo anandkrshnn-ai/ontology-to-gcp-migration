@@ -17,7 +17,7 @@ spec:
       type: STRING(100)
       required: false
     - name: country
-      type: STRING(100)
+      type: STRING(200)
       required: false
     - name: source
       type: STRING(100)
