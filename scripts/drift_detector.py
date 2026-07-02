@@ -1,274 +1,553 @@
-#!/usr/import/env python
+#!/usr/bin/env python3
+
 import argparse
-import os
-import sys
-import yaml
 import json
+import os
+import re
+import sys
+from typing import Dict
+
+import yaml
 from google.cloud import spanner
 
 
-def load_ontology_schemas(ontology_dir, changed_files=None):
-    """
-    Incremental mode: if changed_files list provided, only parse those files.
-    Full mode: scans every .yaml/.yml file in ontology_dir.
-    Returns: dict {table_name: {column_name: spanner_type}}
-    """
+# ============================================================
+# ONTOLOGY LOADER
+# ============================================================
+
+def normalize_type(spanner_type: str) -> str:
+    if not spanner_type:
+        return "STRING(MAX)"
+    return str(spanner_type).upper().replace(" ", "")
+
+
+def load_ontology_schemas(
+        ontology_dir: str,
+        changed_files=None
+) -> Dict[str, Dict[str, str]]:
+
     schemas = {}
 
-    if changed_files is not None:
-        files_to_scan = [f for f in changed_files if f.endswith(".yaml") or f.endswith(".yml")]
-        print(f"  ⚡ Incremental mode: scanning {len(files_to_scan)} changed file(s).")
+    if changed_files:
+        files_to_scan = [
+            f for f in changed_files
+            if f.endswith(".yaml") or f.endswith(".yml")
+        ]
+        print(
+            f"⚡ Incremental mode: "
+            f"scanning {len(files_to_scan)} ontology file(s)"
+        )
     else:
+
         if not os.path.exists(ontology_dir):
-            print(f"Error: Ontology directory {ontology_dir} not found.")
-            return schemas
+            raise FileNotFoundError(
+                f"Ontology directory not found: {ontology_dir}"
+            )
+
         files_to_scan = [
             os.path.join(ontology_dir, f)
             for f in os.listdir(ontology_dir)
             if f.endswith(".yaml") or f.endswith(".yml")
         ]
-        print(f"  🔍 Full mode: scanning all {len(files_to_scan)} file(s) in {ontology_dir}.")
+
+        print(
+            f"🔍 Full mode: scanning "
+            f"{len(files_to_scan)} ontology file(s)"
+        )
 
     for filepath in files_to_scan:
+
         if not os.path.isfile(filepath):
-            print(f"  ⚠️  Skipping (not found): {filepath}")
+            print(f"Skipping missing file: {filepath}")
             continue
-        with open(filepath, 'r', encoding='utf-8') as f:
-            try:
-                data = yaml.safe_load(f)
-                spec = data.get("spec", {})
-                table_name = spec.get("tableName", spec.get("table"))
-                if not table_name:
-                    continue
-                columns = {}
-                if data.get("kind") == "ObjectType":
-                    if "attributes" in spec and "properties" not in spec:
-                        for attr in spec.get("attributes", []):
-                            columns[attr["name"]] = attr.get("type", "STRING(MAX)").upper()
-                    elif "properties" in spec:
-                        for prop_name, prop_def in spec["properties"].items():
-                            columns[prop_name] = prop_def.get("type", "STRING(MAX)").upper()
-                elif data.get("kind") == "RelationshipType":
-                    if "attributes" in spec:
-                        for attr in spec.get("attributes", []):
-                            columns[attr["name"]] = attr.get("type", "STRING(MAX)").upper()
-                    elif "properties" in spec:
-                        for prop_name, prop_def in spec["properties"].items():
-                            columns[prop_name] = prop_def.get("type", "STRING(MAX)").upper()
-                    # sourceKey/targetKey are graph metadata — NOT physical columns
-                if columns:
-                    schemas[table_name] = columns
-            except Exception as e:
-                print(f"Error parsing {filepath}: {e}")
+
+        with open(filepath, "r", encoding="utf-8") as f:
+
+            data = yaml.safe_load(f)
+
+            if not isinstance(data, dict):
+                continue
+
+            spec = data.get("spec", {})
+
+            table_name = (
+                    spec.get("tableName")
+                    or spec.get("table")
+            )
+
+            if not table_name:
+                continue
+
+            columns = {}
+
+            #
+            # ATTRIBUTES FORMAT
+            #
+            if "attributes" in spec:
+
+                for attr in spec.get("attributes", []):
+
+                    name = attr.get("name")
+
+                    if not name:
+                        continue
+
+                    columns[name] = normalize_type(
+                        attr.get("type", "STRING(MAX)")
+                    )
+
+            #
+            # PROPERTIES FORMAT
+            #
+            if "properties" in spec:
+
+                props = spec.get("properties", {})
+
+                if isinstance(props, dict):
+
+                    for prop_name, prop_def in props.items():
+
+                        columns[prop_name] = normalize_type(
+                            prop_def.get("type", "STRING(MAX)")
+                        )
+
+            if columns:
+                schemas[table_name] = columns
 
     return schemas
 
 
-def get_live_spanner_schema(project_id, instance_id, database_id, table_filter=None):
-    """
-    Incremental mode: table_filter limits Spanner query to only relevant tables.
-    Full mode: fetches all tables.
-    Returns: dict {table_name: {column_name: spanner_type}}
-    """
+# ============================================================
+# SPANNER DISCOVERY
+# ============================================================
+
+SYSTEM_TABLES = {
+    "raw_yaml_registry",
+    "canonical_object_types",
+    "canonical_relationship_types",
+    "schema_change_log",
+    "deployment_audit",
+    "rule_audit",
+    "ontology_object_registry",
+    "file_processing_status",
+    "rule_definitions",
+    "transactions",
+    "ontology_change_log"
+}
+
+
+def get_live_spanner_schema(
+        project_id,
+        instance_id,
+        database_id,
+        table_filter=None
+):
     if project_id:
-        spanner_client = spanner.Client(project=project_id)
+        client = spanner.Client(project=project_id)
     else:
-        spanner_client = spanner.Client()
-    instance = spanner_client.instance(instance_id)
+        client = spanner.Client()
+
+    instance = client.instance(instance_id)
     database = instance.database(database_id)
 
-    base_query = """
-        SELECT table_name, column_name, spanner_type
-        FROM information_schema.columns
-        WHERE table_catalog = '' AND table_schema = ''
-        AND table_name NOT LIKE 'v_%'
-        AND table_name NOT IN ('raw_yaml_registry', 'canonical_object_types',
-            'canonical_relationship_types', 'schema_change_log', 'deployment_audit', 'rule_audit', 'transit_connection', 'ontology_object_registry', 'file_processing_status', 'rule_definitions', 'route', 'transactions', 'waypoint', 'ontology_change_log', 'location')
+    query = """
+    SELECT
+        table_name,
+        column_name,
+        spanner_type
+    FROM information_schema.columns
+    WHERE table_catalog = ''
+      AND table_schema = ''
+      AND table_name NOT LIKE 'v_%'
     """
 
-    if table_filter:
-        placeholders = ", ".join([f"'{t}'" for t in table_filter])
-        query = base_query + f" AND table_name IN ({placeholders})"
-        print(f"  ⚡ Incremental Spanner query: fetching {len(table_filter)} table(s) only.")
-    else:
-        query = base_query
-        print(f"  🔍 Full Spanner query: fetching all tables.")
-
     live_schema = {}
-    try:
-        with database.snapshot() as snapshot:
-            results = snapshot.execute_sql(query)
-            for row in results:
-                table_name, column_name, spanner_type = row[0], row[1], row[2].upper()
-                if table_name not in live_schema:
-                    live_schema[table_name] = {}
-                live_schema[table_name][column_name] = spanner_type
-    except Exception as e:
-        print(f"Error querying Spanner: {e}")
-        raise e
+
+    with database.snapshot() as snapshot:
+
+        rows = snapshot.execute_sql(query)
+
+        for row in rows:
+
+            table_name = row[0]
+
+            if table_name in SYSTEM_TABLES:
+                continue
+
+            if table_filter and table_name not in table_filter:
+                continue
+
+            column_name = row[1]
+            spanner_type = normalize_type(row[2])
+
+            live_schema.setdefault(
+                table_name,
+                {}
+            )[column_name] = spanner_type
 
     return live_schema
 
 
-def detect_drift(canonical_schemas, live_schemas):
+# ============================================================
+# TYPE COMPATIBILITY
+# ============================================================
+
+def string_length(spanner_type):
+
+    m = re.match(r"STRING\((.+)\)", spanner_type)
+
+    if not m:
+        return None
+
+    value = m.group(1)
+
+    if value == "MAX":
+        return 999999999
+
+    return int(value)
+
+
+def is_compatible_type_change(
+        live_type,
+        yaml_type
+):
+
+    live_type = normalize_type(live_type)
+    yaml_type = normalize_type(yaml_type)
+
+    if live_type == yaml_type:
+        return True
+
+    #
+    # STRING EXPANSION
+    #
+    if (
+            live_type.startswith("STRING(")
+            and yaml_type.startswith("STRING(")
+    ):
+        return (
+                string_length(yaml_type)
+                >=
+                string_length(live_type)
+        )
+
+    return False
+
+
+# ============================================================
+# DRIFT DETECTOR
+# ============================================================
+
+def detect_drift(
+        canonical_schemas,
+        live_schemas
+):
+
     report = {
         "drift_detected": False,
-        "pending_evolution": {"tables_to_create": [], "columns_to_add": {}},
+
+        "pending_evolution": {
+            "tables_to_create": [],
+            "columns_to_add": {},
+            "compatible_type_changes": {}
+        },
+
         "true_drift_details": {}
     }
-    canonical_tables = set(canonical_schemas.keys())
-    live_tables = set(live_schemas.keys())
 
-    tables_to_create = list(canonical_tables - live_tables)
-    if tables_to_create:
-        report["pending_evolution"]["tables_to_create"] = tables_to_create
+    canonical_tables = set(
+        canonical_schemas.keys()
+    )
 
-    tables_missing_in_yaml = list(live_tables - canonical_tables)
-    if tables_missing_in_yaml:
+    live_tables = set(
+        live_schemas.keys()
+    )
+
+    #
+    # NEW TABLES
+    #
+    report["pending_evolution"]["tables_to_create"] = sorted(
+        list(
+            canonical_tables - live_tables
+        )
+    )
+
+    #
+    # TABLES EXIST IN SPANNER
+    # BUT NOT IN CANONICAL YAML
+    #
+    extra_tables = sorted(
+        list(
+            live_tables - canonical_tables
+        )
+    )
+
+    if extra_tables:
+
         report["drift_detected"] = True
-        report["true_drift_details"]["tables_missing_in_yaml"] = tables_missing_in_yaml
 
-    for table in canonical_tables.intersection(live_tables):
-        c_cols = canonical_schemas[table]
-        l_cols = live_schemas[table]
-        c_col_names = set(c_cols.keys())
-        l_col_names = set(l_cols.keys())
+        report["true_drift_details"][
+            "tables_missing_in_yaml"
+        ] = extra_tables
 
-        columns_to_add = list(c_col_names - l_col_names)
-        if columns_to_add:
-            report["pending_evolution"]["columns_to_add"][table] = columns_to_add
+    #
+    # TABLE COMPARISON
+    #
+    for table in canonical_tables.intersection(
+            live_tables
+    ):
 
-        extra_in_spanner = list(l_col_names - c_col_names)
-        if extra_in_spanner:
-            print(f"  ℹ️  INFO: '{table}' has undeclared Spanner columns: {sorted(extra_in_spanner)}")
-            print(f"      (Safe to ignore. Consider adding to YAML for completeness.)")
+        ccols = canonical_schemas[table]
+        lcols = live_schemas[table]
 
-        type_mismatches = []
-        for col in c_col_names.intersection(l_col_names):
-            c_type = c_cols[col].replace(" ", "")
-            l_type = l_cols[col].replace(" ", "")
-            if c_type != l_type:
-                if c_type == "STRING" and l_type.startswith("STRING"):
-                    continue
-                type_mismatches.append({"column": col, "expected": c_type, "actual": l_type})
-        if type_mismatches:
+        cset = set(ccols.keys())
+        lset = set(lcols.keys())
+
+        #
+        # NEW COLUMNS
+        #
+        new_columns = sorted(
+            list(cset - lset)
+        )
+
+        if new_columns:
+
+            report["pending_evolution"][
+                "columns_to_add"
+            ][table] = new_columns
+
+        #
+        # EXTRA COLUMNS
+        #
+        extra_columns = sorted(
+            list(lset - cset)
+        )
+
+        if extra_columns:
+
+            print(
+                f"INFO: "
+                f"{table} has undeclared columns "
+                f"{extra_columns}"
+            )
+
+        #
+        # TYPE CHECK
+        #
+        for col in cset.intersection(lset):
+
+            yaml_type = normalize_type(
+                ccols[col]
+            )
+
+            live_type = normalize_type(
+                lcols[col]
+            )
+
+            if yaml_type == live_type:
+                continue
+
+            #
+            # COMPATIBLE EVOLUTION
+            #
+            if is_compatible_type_change(
+                    live_type,
+                    yaml_type
+            ):
+
+                report[
+                    "pending_evolution"
+                ][
+                    "compatible_type_changes"
+                ].setdefault(
+                    table,
+                    []
+                ).append(
+                    {
+                        "column": col,
+                        "from": live_type,
+                        "to": yaml_type
+                    }
+                )
+
+                continue
+
+            #
+            # BREAKING DRIFT
+            #
             report["drift_detected"] = True
-            report["true_drift_details"][table] = {"type_mismatches": type_mismatches}
+
+            report[
+                "true_drift_details"
+            ].setdefault(
+                table,
+                {
+                    "type_mismatches": []
+                }
+            )
+
+            report[
+                "true_drift_details"
+            ][
+                table
+            ][
+                "type_mismatches"
+            ].append(
+                {
+                    "column": col,
+                    "expected": yaml_type,
+                    "actual": live_type
+                }
+            )
 
     return report
 
 
+# ============================================================
+# MAIN
+# ============================================================
+
 def main():
-    parser = argparse.ArgumentParser(description="Spanner Schema Drift Detector")
-    parser.add_argument("--ontology_dir", required=True)
-    parser.add_argument("--instance", required=True)
-    parser.add_argument("--database", required=True)
-    parser.add_argument("--project", required=False, help="GCP Project ID")
-    parser.add_argument("--apply-mode", choices=["auto-additive", "manual", "strict"], default="auto-additive")
-    parser.add_argument("--apply", action="store_true")
-    parser.add_argument(
-        "--changed-files",
-        help="Path to a text file listing changed YAML paths (one per line). "
-             "Enables incremental mode — only changed files parsed, only their "
-             "tables queried from Spanner. Omit for full scan."
+
+    parser = argparse.ArgumentParser(
+        description="Ontology Drift Detector"
     )
+
+    parser.add_argument(
+        "--ontology_dir",
+        required=True
+    )
+
+    parser.add_argument(
+        "--instance",
+        required=True
+    )
+
+    parser.add_argument(
+        "--database",
+        required=True
+    )
+
+    parser.add_argument(
+        "--project"
+    )
+
+    parser.add_argument(
+        "--apply-mode",
+        default="auto-additive",
+        choices=[
+            "auto-additive",
+            "manual",
+            "strict"
+        ]
+    )
+
+    parser.add_argument(
+        "--changed-files"
+    )
+
     args = parser.parse_args()
 
     changed_files = None
     table_filter = None
 
     if args.changed_files:
-        if not os.path.isfile(args.changed_files):
-            print(f"⚠️  --changed-files path not found: {args.changed_files}. Falling back to full scan.")
-        else:
-            with open(args.changed_files, 'r') as cf:
-                changed_files = [line.strip() for line in cf if line.strip()]
-            if not changed_files:
-                print("⚠️  --changed-files list is empty. Falling back to full scan.")
-                changed_files = None
 
-    mode_label = "[INCREMENTAL]" if changed_files else "[FULL SCAN]"
-    print(f"Loading canonical schemas from {args.ontology_dir} {mode_label}...")
+        if os.path.isfile(
+                args.changed_files
+        ):
 
-    canonical = load_ontology_schemas(args.ontology_dir, changed_files=changed_files)
+            with open(
+                    args.changed_files,
+                    "r"
+            ) as f:
+
+                changed_files = [
+                    x.strip()
+                    for x in f
+                    if x.strip()
+                ]
+
+        if not changed_files:
+
+            print(
+                "⚠ Empty changed-files list. "
+                "Using full scan."
+            )
+
+            changed_files = None
+
+    canonical = load_ontology_schemas(
+        args.ontology_dir,
+        changed_files
+    )
 
     if changed_files:
-        table_filter = set(canonical.keys())
+        table_filter = set(
+            canonical.keys()
+        )
 
-    print(f"Fetching live schemas from Spanner ({args.instance}/{args.database})...")
-    live = get_live_spanner_schema(args.project, args.instance, args.database, table_filter=table_filter)
+    live = get_live_spanner_schema(
+        args.project,
+        args.instance,
+        args.database,
+        table_filter
+    )
 
-    print("Comparing schemas for drift...")
-    report = detect_drift(canonical, live)
+    report = detect_drift(
+        canonical,
+        live
+    )
 
+    #
+    # BREAKING DRIFT
+    #
     if report["drift_detected"]:
-        print("\n❌ True schema drift detected (breaking).")
-        print(json.dumps(report["true_drift_details"], indent=2))
+
+        print(
+            "\n❌ BREAKING DRIFT DETECTED"
+        )
+
+        print(
+            json.dumps(
+                report["true_drift_details"],
+                indent=2
+            )
+        )
+
         sys.exit(1)
 
-    has_evolution = bool(report["pending_evolution"]["tables_to_create"] or report["pending_evolution"]["columns_to_add"])
+    #
+    # COMPATIBLE EVOLUTION
+    #
+    has_evolution = any([
+        report["pending_evolution"]["tables_to_create"],
+        report["pending_evolution"]["columns_to_add"],
+        report["pending_evolution"]["compatible_type_changes"]
+    ])
 
     if has_evolution:
-        if args.apply_mode == "strict":
-            print("\n❌ Strict mode: additive changes are not allowed.")
-            print(json.dumps(report["pending_evolution"], indent=2))
-            sys.exit(1)
-        elif args.apply_mode == "manual":
-            print("\n⚠️ Pending additive schema evolution. Approve to apply:")
-            print(json.dumps(report["pending_evolution"], indent=2))
-            sys.exit(0)
-        else:
-            print("\n✅ Auto-additive mode: pending evolution allowed.")
-            print(json.dumps(report["pending_evolution"], indent=2))
-            if args.apply:
-                print("Applying schema evolution DDL to Spanner...")
-                if args.project:
-                    spanner_client = spanner.Client(project=args.project)
-                else:
-                    spanner_client = spanner.Client()
-                instance = spanner_client.instance(args.instance)
-                database = instance.database(args.database)
-                
-                statements = []
-                
-                # 1. ALTER TABLE for new columns
-                for table, cols in report["pending_evolution"]["columns_to_add"].items():
-                    for col in cols:
-                        col_type = canonical[table][col]
-                        statements.append(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
-                
-                # 2. CREATE TABLE for new tables
-                if report["pending_evolution"]["tables_to_create"]:
-                    from scripts.graph_compiler import GraphCompiler
-                    compiler = GraphCompiler("ADDITIVE", {})
-                    for f in os.listdir(args.ontology_dir):
-                        if f.endswith(".yaml") or f.endswith(".yml"):
-                            with open(os.path.join(args.ontology_dir, f), 'r', encoding='utf-8') as file:
-                                try:
-                                    data = yaml.safe_load(file)
-                                    spec = data.get("spec", {})
-                                    table_name = spec.get("tableName", spec.get("table"))
-                                    if table_name in report["pending_evolution"]["tables_to_create"]:
-                                        ddl = compiler.generate_table_ddl(data)
-                                        if ddl:
-                                            statements.append(ddl)
-                                except Exception as e:
-                                    print(f"Error parsing {f} for DDL: {e}")
-                
-                if statements:
-                    print(f"Executing {len(statements)} DDL statement(s)...")
-                    for stmt in statements:
-                        print(f" -> {stmt}")
-                    clean_statements = [s.rstrip().rstrip(';') for s in statements if s.strip()]
-                    operation = database.update_ddl(clean_statements)
-                    operation.result() # Wait for completion
-                    print("Schema evolution applied successfully.")
-                else:
-                    print("No DDL statements generated.")
-                    
-            sys.exit(0)
 
-    print("\n✅ NO DRIFT DETECTED. Live Spanner schema matches canonical YAML specifications.")
+        print(
+            "\n✅ COMPATIBLE SCHEMA EVOLUTION"
+        )
+
+        print(
+            json.dumps(
+                report["pending_evolution"],
+                indent=2
+            )
+        )
+
+        if args.apply_mode == "strict":
+            sys.exit(1)
+
+        sys.exit(0)
+
+    print(
+        "\n✅ NO DRIFT DETECTED"
+    )
+
     sys.exit(0)
 
 
