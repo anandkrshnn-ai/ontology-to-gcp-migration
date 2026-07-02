@@ -66,7 +66,6 @@ steps:
         python -m scripts.drift_detector \
           --ontology_dir=ontology \
           --apply-mode=auto-additive \
-          --apply \
           --project=tzwkexo-re-ai-lab \
           --instance=fedex-spanner-instance \
           --database=fedex_sandbox
